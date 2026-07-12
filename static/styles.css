@@ -190,6 +190,17 @@ button.danger:hover {
   background: var(--danger-soft);
 }
 
+button.danger-solid {
+  color: #fff;
+  background: var(--danger);
+  border-color: var(--danger);
+  font-weight: 500;
+}
+button.danger-solid:hover {
+  background: #c92f2f;
+  border-color: #c92f2f;
+}
+
 .button-row {
   display: flex;
   gap: 6px;
@@ -223,19 +234,16 @@ button.danger:hover {
 }
 
 .conversation-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  gap: 4px;
   width: 100%;
-  text-align: left;
-  border: none;
-  background: transparent;
-  padding: 5px 8px;
+  padding: 5px 6px 5px 8px;
   border-radius: var(--radius-sm);
   font-size: 13px;
   color: var(--text);
   margin: 1px 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  cursor: pointer;
 }
 .conversation-item:hover {
   background: var(--hover);
@@ -243,6 +251,33 @@ button.danger:hover {
 .conversation-item.active {
   background: var(--hover-strong);
   font-weight: 500;
+}
+.conversation-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.conversation-delete {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  padding: 2px 4px;
+  border-radius: var(--radius-sm);
+  opacity: 0; /* revealed on row hover */
+  transition: opacity 0.12s ease, background 0.12s ease, color 0.12s ease;
+}
+.conversation-item:hover .conversation-delete {
+  opacity: 1;
+}
+.conversation-delete:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
 }
 
 .status {

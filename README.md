@@ -15,11 +15,11 @@ OpenYoke is an open-source **Ollama desktop GUI** and **private ChatGPT alternat
 
 </div>
 
-<!--
-  📸 Add a hero screenshot here for maximum impact, e.g.:
-  ![OpenYoke branching conversation graph](docs/screenshot.png)
-  A screenshot of the graph view is the single biggest thing you can add to earn stars.
--->
+<p align="center">
+  <img src="docs/screenshot.png" alt="OpenYoke — a branching AI conversation shown as an interactive graph, with the selected branch's transcript in the side panel" width="900">
+</p>
+
+<p align="center"><em>Branch a conversation from any point and explore each direction as a graph — every branch keeps its own context.</em></p>
 
 ---
 

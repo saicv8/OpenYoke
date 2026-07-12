@@ -327,6 +327,21 @@ fn rename_conversation(
     Ok(updated)
 }
 
+/// Delete a whole conversation (and, implicitly, its entire node tree).
+#[tauri::command]
+fn delete_conversation(
+    app: AppHandle,
+    write_lock: State<'_, WriteLock>,
+    conversation_id: u64,
+) -> Result<Value, String> {
+    let _guard = write_lock.lock().map_err(|_| "conversation lock poisoned".to_string())?;
+    let mut conversations = read_conversations(&app)?;
+    let idx = conversation_index(&conversations, conversation_id)?;
+    conversations.remove(idx);
+    write_conversations(&app, &conversations)?;
+    Ok(json!({ "deletedId": conversation_id }))
+}
+
 // --- Model backend commands (delegate to the ollama module) -----------------
 
 #[tauri::command]
@@ -368,6 +383,7 @@ fn main() {
             update_node_position,
             delete_node,
             rename_conversation,
+            delete_conversation,
             list_models,
             pull_model,
             delete_model,
