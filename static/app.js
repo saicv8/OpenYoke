@@ -45,6 +45,43 @@ const storageInput = document.getElementById('storage-input');
 const storageError = document.getElementById('storage-error');
 const storageSaveButton = document.getElementById('storage-save');
 
+// --- Confirmation dialog ----------------------------------------------------
+const confirmModal = document.getElementById('confirm-modal');
+const confirmTitle = document.getElementById('confirm-title');
+const confirmMessage = document.getElementById('confirm-message');
+const confirmOk = document.getElementById('confirm-ok');
+const confirmCancel = document.getElementById('confirm-cancel');
+let confirmResolve = null;
+
+/// In-app replacement for window.confirm() (which is unreliable in the webview).
+/// Returns a Promise<boolean>.
+function confirmDialog(message, { title = 'Are you sure?', confirmLabel = 'Delete' } = {}) {
+  confirmTitle.textContent = title;
+  confirmMessage.textContent = message;
+  confirmOk.textContent = confirmLabel;
+  confirmModal.classList.remove('hidden');
+  confirmOk.focus();
+  return new Promise((resolve) => {
+    confirmResolve = resolve;
+  });
+}
+
+function closeConfirm(result) {
+  confirmModal.classList.add('hidden');
+  const resolve = confirmResolve;
+  confirmResolve = null;
+  if (resolve) resolve(result);
+}
+
+confirmOk.addEventListener('click', () => closeConfirm(true));
+confirmCancel.addEventListener('click', () => closeConfirm(false));
+confirmModal.addEventListener('click', (event) => {
+  if (event.target === confirmModal) closeConfirm(false); // click backdrop = cancel
+});
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && !confirmModal.classList.contains('hidden')) closeConfirm(false);
+});
+
 // --- Shared state -----------------------------------------------------------
 let currentConversationId = null;
 let conversationsCache = [];
@@ -271,14 +308,57 @@ async function loadConversations() {
 
 function renderConversationList() {
   conversationList.innerHTML = '';
-  conversationsCache.forEach((conversation) => {
-    const item = document.createElement('button');
+  // Newest first (ids are monotonic, so highest id = most recently created).
+  const ordered = [...conversationsCache].sort((a, b) => b.id - a.id);
+  ordered.forEach((conversation) => {
+    const item = document.createElement('div');
     item.className = 'conversation-item';
     if (conversation.id === currentConversationId) item.classList.add('active');
-    item.textContent = conversation.title;
     item.addEventListener('click', () => openConversation(conversation.id));
+
+    const title = document.createElement('span');
+    title.className = 'conversation-title';
+    title.textContent = conversation.title;
+
+    const del = document.createElement('button');
+    del.className = 'conversation-delete';
+    del.title = 'Delete conversation';
+    del.innerHTML =
+      '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v4M14 11v4"/></svg>';
+    del.addEventListener('click', (event) => {
+      event.stopPropagation(); // don't open the conversation
+      deleteConversation(conversation.id, conversation.title);
+    });
+
+    item.appendChild(title);
+    item.appendChild(del);
     conversationList.appendChild(item);
   });
+}
+
+async function deleteConversation(id, title) {
+  const ok = await confirmDialog(
+    `This removes “${title}” and all of its branches, and can't be undone.`,
+    { title: 'Delete conversation?', confirmLabel: 'Delete' }
+  );
+  if (!ok) return;
+  try {
+    await invoke('delete_conversation', { conversationId: id });
+    conversationsCache = conversationsCache.filter((c) => c.id !== id);
+    if (id === currentConversationId) {
+      // The open conversation was deleted — fall back to the newest remaining, or a fresh one.
+      if (conversationsCache.length) {
+        openConversation(conversationsCache[conversationsCache.length - 1].id);
+      } else {
+        await createConversation();
+      }
+    } else {
+      renderConversationList();
+    }
+    statusDiv.textContent = `Deleted "${title}".`;
+  } catch (error) {
+    statusDiv.textContent = `Could not delete conversation: ${error}`;
+  }
 }
 
 async function createConversation() {
@@ -680,7 +760,11 @@ async function deleteSelectedNode() {
   if (selectedNodeId == null) return;
   const node = nodeIndex.get(selectedNodeId);
   if (!node) return;
-  if (!confirm('Delete this node and all of its follow-ups?')) return;
+  const ok = await confirmDialog('This deletes the node and all of its follow-ups.', {
+    title: 'Delete node?',
+    confirmLabel: 'Delete',
+  });
+  if (!ok) return;
 
   const convId = currentConversationId;
   const parentId = node.parentId;
@@ -945,7 +1029,11 @@ async function renderInstalledModels() {
 }
 
 async function deleteModel(name) {
-  if (!confirm(`Delete ${name}? This removes the downloaded weights.`)) return;
+  const ok = await confirmDialog(`This removes the downloaded weights for ${name}.`, {
+    title: 'Delete model?',
+    confirmLabel: 'Delete',
+  });
+  if (!ok) return;
   try {
     await invoke('delete_model', { baseUrl: baseUrl(), model: name });
     statusDiv.textContent = `Deleted ${name}.`;
