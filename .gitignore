@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+*.db
+.env
+.venv/
+venv/
+.pytest_cache/
+node_modules/
+
+# Rust / Tauri
+/src-tauri/target/
+/src-tauri/gen/
+
+# macOS / OS cruft
+.DS_Store
+*.log

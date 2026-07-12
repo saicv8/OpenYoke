@@ -1,0 +1,32 @@
+{
+  "name": "openyoke",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A private, local-first desktop app for chatting with open-source AI models — with branching conversations you explore as a visual graph. An Ollama GUI and offline ChatGPT alternative.",
+  "license": "MIT",
+  "keywords": [
+    "ollama",
+    "ollama-gui",
+    "local-first",
+    "llm",
+    "ai",
+    "chatgpt-alternative",
+    "offline",
+    "privacy",
+    "open-source-models",
+    "branching-conversations",
+    "conversation-tree",
+    "tauri",
+    "rust",
+    "desktop-app"
+  ],
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.1"
+  }
+}

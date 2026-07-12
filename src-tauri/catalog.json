@@ -1,0 +1,110 @@
+{
+  "version": 1,
+  "models": [
+    {
+      "name": "llama3.2",
+      "title": "Llama 3.2",
+      "publisher": "Meta",
+      "description": "Compact, capable general-purpose model. A great default for chat.",
+      "tags": ["general", "chat"],
+      "variants": [
+        { "tag": "llama3.2:1b", "label": "1B", "size": "1.3 GB" },
+        { "tag": "llama3.2:3b", "label": "3B", "size": "2.0 GB" }
+      ]
+    },
+    {
+      "name": "llama3.1",
+      "title": "Llama 3.1",
+      "publisher": "Meta",
+      "description": "Larger Llama with strong reasoning and long context.",
+      "tags": ["general", "reasoning"],
+      "variants": [
+        { "tag": "llama3.1:8b", "label": "8B", "size": "4.9 GB" }
+      ]
+    },
+    {
+      "name": "qwen2.5",
+      "title": "Qwen 2.5",
+      "publisher": "Alibaba",
+      "description": "Strong multilingual general model across a wide size range.",
+      "tags": ["general", "multilingual"],
+      "variants": [
+        { "tag": "qwen2.5:3b", "label": "3B", "size": "1.9 GB" },
+        { "tag": "qwen2.5:7b", "label": "7B", "size": "4.7 GB" }
+      ]
+    },
+    {
+      "name": "qwen2.5-coder",
+      "title": "Qwen 2.5 Coder",
+      "publisher": "Alibaba",
+      "description": "Code-specialized model for generation, completion, and review.",
+      "tags": ["code"],
+      "variants": [
+        { "tag": "qwen2.5-coder:1.5b", "label": "1.5B", "size": "1.0 GB" },
+        { "tag": "qwen2.5-coder:7b", "label": "7B", "size": "4.7 GB" }
+      ]
+    },
+    {
+      "name": "mistral",
+      "title": "Mistral",
+      "publisher": "Mistral AI",
+      "description": "Fast, well-rounded 7B model with permissive licensing.",
+      "tags": ["general", "chat"],
+      "variants": [
+        { "tag": "mistral:7b", "label": "7B", "size": "4.1 GB" }
+      ]
+    },
+    {
+      "name": "gemma2",
+      "title": "Gemma 2",
+      "publisher": "Google",
+      "description": "Efficient open model with good quality at small sizes.",
+      "tags": ["general", "chat"],
+      "variants": [
+        { "tag": "gemma2:2b", "label": "2B", "size": "1.6 GB" },
+        { "tag": "gemma2:9b", "label": "9B", "size": "5.4 GB" }
+      ]
+    },
+    {
+      "name": "phi3",
+      "title": "Phi-3",
+      "publisher": "Microsoft",
+      "description": "Small model tuned for reasoning that punches above its size.",
+      "tags": ["reasoning", "small"],
+      "variants": [
+        { "tag": "phi3:mini", "label": "Mini (3.8B)", "size": "2.2 GB" }
+      ]
+    },
+    {
+      "name": "deepseek-r1",
+      "title": "DeepSeek-R1",
+      "publisher": "DeepSeek",
+      "description": "Reasoning model that thinks step-by-step before answering.",
+      "tags": ["reasoning"],
+      "variants": [
+        { "tag": "deepseek-r1:1.5b", "label": "1.5B", "size": "1.1 GB" },
+        { "tag": "deepseek-r1:8b", "label": "8B", "size": "4.9 GB" }
+      ]
+    },
+    {
+      "name": "llava",
+      "title": "LLaVA",
+      "publisher": "LLaVA",
+      "description": "Vision model that can describe and answer questions about images.",
+      "tags": ["vision", "multimodal"],
+      "variants": [
+        { "tag": "llava:7b", "label": "7B", "size": "4.7 GB" }
+      ]
+    },
+    {
+      "name": "nomic-embed-text",
+      "title": "Nomic Embed Text",
+      "publisher": "Nomic",
+      "description": "Text embedding model for search and retrieval, not chat.",
+      "tags": ["embedding"],
+      "variants": [
+        { "tag": "nomic-embed-text", "label": "Latest", "size": "0.3 GB" }
+      ]
+    }
+  ]
+}
