@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OpenYoke</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <section class="sidebar">
+        <h1>OpenYoke</h1>
+        <p>Local-first AI harness for open source models.</p>
+        <label class="field">
+          <span>Ollama base URL</span>
+          <input id="base-url" type="text" value="http://127.0.0.1:11434" />
+        </label>
+        <label class="field">
+          <span>Active model</span>
+          <select id="model-select"></select>
+        </label>
+        <label class="field">
+          <span>Catalog URL (optional)</span>
+          <input id="catalog-url" type="text" placeholder="https://.../catalog.json" />
+        </label>
+        <label class="field">
+          <span>Storage folder</span>
+          <input id="storage-path" type="text" readonly />
+        </label>
+        <button id="change-storage" class="secondary">Change storage folder…</button>
+        <div class="button-row">
+          <button id="refresh-models" class="primary">Refresh</button>
+          <button id="save-settings">Save settings</button>
+        </div>
+        <button id="new-conversation" class="secondary">New conversation</button>
+        <div class="conversation-list">
+          <h3>Conversations</h3>
+          <div id="conversations"></div>
+        </div>
+        <div id="status" class="status">Ready to connect.</div>
+      </section>
+
+      <section class="main-panel">
+        <nav class="tabs">
+          <button id="tab-graph" class="tab active" data-view="graph">Graph</button>
+          <button id="tab-models" class="tab" data-view="models">Models</button>
+        </nav>
+
+        <!-- Graph view: branching conversation tree + side panel -->
+        <section id="view-graph" class="view graph-view">
+          <div id="graph-viewport">
+            <div id="graph-world">
+              <svg id="graph-edges" xmlns="http://www.w3.org/2000/svg"></svg>
+              <!-- .gnode cards are appended here by app.js -->
+            </div>
+            <div id="graph-hint" class="graph-hint hidden">
+              Drag to pan · scroll to zoom · click a node to open it
+            </div>
+          </div>
+
+          <div id="panel-resizer" class="panel-resizer" title="Drag to resize the panel"></div>
+
+          <aside id="node-panel" class="node-panel">
+            <div class="panel-head">
+              <span id="panel-title">New thread</span>
+              <button id="new-thread" class="secondary" type="button">+ New thread</button>
+            </div>
+            <div id="panel-transcript" class="panel-transcript"></div>
+            <form id="node-form" class="composer">
+              <textarea id="node-prompt" rows="3" placeholder="Ask the next question…"></textarea>
+              <div class="panel-actions">
+                <button id="node-delete" class="danger hidden" type="button">Delete node</button>
+                <button id="node-send" class="primary" type="submit">Ask</button>
+              </div>
+            </form>
+          </aside>
+        </section>
+
+        <!-- Models view -->
+        <section id="view-models" class="view models-panel hidden">
+          <div class="models-section">
+            <h2>Installed models</h2>
+            <div id="installed-models" class="installed-list"></div>
+          </div>
+
+          <div class="models-section">
+            <h2>Download a model</h2>
+            <form id="pull-form" class="pull-form">
+              <input id="pull-name" type="text" placeholder="Exact name, e.g. llama3.2:3b" />
+              <button class="primary" type="submit">Download</button>
+            </form>
+            <div id="pull-progress" class="pull-progress hidden">
+              <div id="pull-label" class="pull-label"></div>
+              <progress id="pull-bar" max="100"></progress>
+            </div>
+          </div>
+
+          <div class="models-section">
+            <div class="library-header">
+              <h2>Model library</h2>
+              <span id="catalog-source" class="catalog-source"></span>
+            </div>
+            <input id="catalog-search" type="text" placeholder="Search models…" />
+            <div id="catalog" class="catalog-grid"></div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <!-- Required storage-location gate. Shown until a valid folder is chosen. -->
+    <div id="storage-modal" class="modal-overlay hidden">
+      <div class="modal">
+        <h2>Choose where to save your data</h2>
+        <p>
+          OpenYoke stores your conversations and settings in a folder you choose,
+          so they survive restarts. Enter an absolute folder path to continue.
+        </p>
+        <input id="storage-input" type="text" placeholder="/Users/you/OpenYoke" />
+        <div id="storage-error" class="modal-error"></div>
+        <div class="modal-actions">
+          <button id="storage-save" class="primary">Save &amp; continue</button>
+        </div>
+      </div>
+    </div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
