@@ -113,13 +113,14 @@ pub async fn list_models(base_url: &str) -> Result<Value, String> {
 pub async fn chat_stream(
     base_url: &str,
     model: &str,
+    system: &str,
     messages: &[Value],
     channel: &Channel<ChatChunk>,
 ) -> Result<String, String> {
     let url = format!("{}/api/chat", normalize(base_url));
     let payload = json!({
         "model": model,
-        "messages": messages,
+        "messages": crate::sse::with_system(system, messages),
         "stream": true,
     });
 

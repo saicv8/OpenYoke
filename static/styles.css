@@ -288,6 +288,35 @@ button.danger-solid:hover {
   line-height: 1.4;
 }
 
+.cloud-keys {
+  margin: 10px 0;
+}
+.cloud-keys > summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 4px 2px;
+  list-style: none;
+  user-select: none;
+}
+.cloud-keys > summary::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-faint);
+  transition: transform 0.12s ease;
+}
+.cloud-keys[open] > summary::before {
+  transform: rotate(90deg);
+}
+.cloud-hint {
+  margin: 6px 2px 0;
+  font-size: 11px;
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+
 /* --- Tabs ----------------------------------------------------------------- */
 
 .tabs {
@@ -567,6 +596,27 @@ button.danger-solid:hover {
   justify-content: space-between;
   gap: 8px;
 }
+.panel-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 5px 10px;
+}
+.toggle:hover {
+  background: var(--hover);
+}
+.toggle.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
 
 /* --- Rendered markdown inside assistant bubbles --------------------------- */
 
@@ -627,6 +677,31 @@ button.danger-solid:hover {
 }
 .message strong {
   font-weight: 600;
+}
+.message .table-wrap {
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.message table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.message th,
+.message td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+  vertical-align: top;
+}
+.message th {
+  background: var(--bg-canvas);
+  font-weight: 600;
+}
+.message hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 12px 0;
 }
 
 /* --- Models tab ----------------------------------------------------------- */

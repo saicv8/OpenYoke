@@ -4,6 +4,11 @@ const { invoke, Channel } = window.__TAURI__.core;
 // --- Sidebar / settings elements --------------------------------------------
 const baseUrlInput = document.getElementById('base-url');
 const catalogUrlInput = document.getElementById('catalog-url');
+const anthropicKeyInput = document.getElementById('anthropic-key');
+const openaiKeyInput = document.getElementById('openai-key');
+const openaiBaseInput = document.getElementById('openai-base');
+const googleKeyInput = document.getElementById('google-key');
+const systemPromptInput = document.getElementById('system-prompt');
 const storagePathInput = document.getElementById('storage-path');
 const changeStorageButton = document.getElementById('change-storage');
 const modelSelect = document.getElementById('model-select');
@@ -35,6 +40,7 @@ const nodePrompt = document.getElementById('node-prompt');
 const nodeSend = document.getElementById('node-send');
 const nodeDelete = document.getElementById('node-delete');
 const newThreadButton = document.getElementById('new-thread');
+const webToggle = document.getElementById('web-toggle');
 const graphView = document.getElementById('view-graph');
 const nodePanel = document.getElementById('node-panel');
 const panelResizer = document.getElementById('panel-resizer');
@@ -86,6 +92,8 @@ document.addEventListener('keydown', (event) => {
 let currentConversationId = null;
 let conversationsCache = [];
 let installedNames = new Set();
+let savedDefaultModel = '';
+let webSearchOn = true; // web search on by default
 
 function baseUrl() {
   return baseUrlInput.value.trim();
@@ -143,8 +151,17 @@ function renderMarkdown(src) {
     }
   };
 
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
+  const lines = text.split('\n');
+  const isTableSep = (s) => /\|/.test(s) && /-/.test(s) && /^[\s|:-]+$/.test(s.trim());
+  const splitRow = (s) => {
+    let row = s.trim();
+    if (row.startsWith('|')) row = row.slice(1);
+    if (row.endsWith('|')) row = row.slice(0, -1);
+    return row.split('|').map((c) => c.trim());
+  };
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i].trim();
     if (!line) {
       flushPara();
       closeList();
@@ -156,6 +173,35 @@ function renderMarkdown(src) {
       out.push(line);
       continue;
     }
+
+    // GFM table: a `| … |` row immediately followed by a `|---|---|` separator.
+    if (line.includes('|') && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+      flushPara();
+      closeList();
+      const header = splitRow(line);
+      const rows = [];
+      let j = i + 2;
+      while (j < lines.length && lines[j].trim() && lines[j].includes('|')) {
+        rows.push(splitRow(lines[j]));
+        j += 1;
+      }
+      const head = header.map((c) => `<th>${c}</th>`).join('');
+      const body = rows
+        .map((r) => `<tr>${header.map((_, k) => `<td>${r[k] || ''}</td>`).join('')}</tr>`)
+        .join('');
+      out.push(`<div class="table-wrap"><table><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table></div>`);
+      i = j - 1; // skip the rows we consumed
+      continue;
+    }
+
+    // Horizontal rule.
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
+      flushPara();
+      closeList();
+      out.push('<hr>');
+      continue;
+    }
+
     const heading = line.match(/^(#{1,6})\s+(.*)$/);
     if (heading) {
       flushPara();
@@ -266,9 +312,13 @@ async function loadSettings() {
     const settings = await invoke('load_settings');
     baseUrlInput.value = settings.base_url || 'http://127.0.0.1:11434';
     catalogUrlInput.value = settings.catalog_url || '';
-    if (settings.default_model) {
-      modelSelect.value = settings.default_model;
-    }
+    anthropicKeyInput.value = settings.anthropic_key || '';
+    openaiKeyInput.value = settings.openai_key || '';
+    openaiBaseInput.value = settings.openai_base_url || '';
+    googleKeyInput.value = settings.google_key || '';
+    systemPromptInput.value = settings.system_prompt || '';
+    savedDefaultModel = settings.default_model || '';
+    modelSelect.value = savedDefaultModel; // re-applied by fetchModels once options exist
   } catch (error) {
     statusDiv.textContent = `Could not load settings: ${error}`;
   }
@@ -280,8 +330,14 @@ async function saveSettings() {
       baseUrl: baseUrl(),
       defaultModel: modelSelect.value || '',
       catalogUrl: catalogUrlInput.value.trim(),
+      openaiKey: openaiKeyInput.value.trim(),
+      openaiBaseUrl: openaiBaseInput.value.trim(),
+      anthropicKey: anthropicKeyInput.value.trim(),
+      googleKey: googleKeyInput.value.trim(),
+      systemPrompt: systemPromptInput.value.trim(),
     });
     statusDiv.textContent = 'Settings saved.';
+    await fetchModels(); // refresh the picker with any newly-configured providers
   } catch (error) {
     statusDiv.textContent = `Could not save settings: ${error}`;
   }
@@ -679,7 +735,7 @@ async function askNext(question) {
   nodeSend.disabled = true;
   nodePrompt.disabled = true;
   nodeDelete.disabled = true;
-  statusDiv.textContent = 'Generating…';
+  statusDiv.textContent = webSearchOn ? 'Searching the web…' : 'Generating…';
 
   // Live transcript: drop any "new thread" hint, show the question, and a
   // streaming assistant bubble that fills in as tokens arrive.
@@ -714,6 +770,7 @@ async function askNext(question) {
       parentId,
       question,
       model,
+      webSearch: webSearchOn,
       x: pos.x,
       y: pos.y,
       channel,
@@ -968,23 +1025,34 @@ if (savedPanelWidth) setPanelWidth(savedPanelWidth);
 async function fetchModels() {
   statusDiv.textContent = 'Loading models...';
   try {
-    const data = await invoke('list_models', { baseUrl: baseUrl() });
-    const models = data.models || [];
-    installedNames = new Set(models.map((m) => m.name));
+    const data = await invoke('list_all_models', { baseUrl: baseUrl() });
+    const groups = data.groups || [];
 
-    const previous = modelSelect.value;
+    // Ollama models feed the catalog's "installed" checks.
+    const ollama = groups.find((g) => g.provider === 'ollama');
+    installedNames = new Set((ollama && ollama.models) || []);
+
+    const desired = modelSelect.value || savedDefaultModel;
     modelSelect.innerHTML = '';
-    models.forEach((model) => {
-      const option = document.createElement('option');
-      option.value = model.name;
-      option.textContent = model.name;
-      modelSelect.appendChild(option);
+    let total = 0;
+    groups.forEach((group) => {
+      if (!group.models || !group.models.length) return;
+      const optgroup = document.createElement('optgroup');
+      optgroup.label = group.label;
+      group.models.forEach((id) => {
+        const option = document.createElement('option');
+        option.value = `${group.provider}:${id}`; // e.g. anthropic:claude-…
+        option.textContent = id;
+        optgroup.appendChild(option);
+        total += 1;
+      });
+      modelSelect.appendChild(optgroup);
     });
-    if (previous && installedNames.has(previous)) modelSelect.value = previous;
+    if (desired) modelSelect.value = desired; // keep/restore selection if still present
 
-    statusDiv.textContent = models.length
-      ? `Loaded ${models.length} models.`
-      : data.message || 'No models found.';
+    statusDiv.textContent = total
+      ? `Loaded ${total} models across ${groups.filter((g) => g.models && g.models.length).length} provider(s).`
+      : 'No models. Start Ollama or add an API key, then Refresh.';
   } catch (error) {
     statusDiv.textContent = `Could not load models: ${error}`;
   }
@@ -1191,5 +1259,13 @@ newThreadButton.addEventListener('click', () => {
   selectNode(null);
   nodePrompt.focus();
 });
+webToggle.addEventListener('click', () => {
+  webSearchOn = !webSearchOn;
+  webToggle.classList.toggle('active', webSearchOn);
+  webToggle.title = webSearchOn
+    ? 'Web search is ON — results are searched and used in the answer'
+    : 'Search the web and use the results in the answer (works with any model)';
+});
+webToggle.classList.toggle('active', webSearchOn); // reflect the default-on state
 
 boot();
