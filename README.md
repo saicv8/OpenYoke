@@ -4,7 +4,7 @@
 
 ### A private, local-first desktop app for chatting with open-source AI models — with branching conversations you explore as a visual graph.
 
-OpenYoke is an open-source **Ollama desktop GUI** and **private ChatGPT alternative** that runs entirely on your machine. No cloud, no accounts, no data leaving your computer. Manage models, chat with streaming responses, and branch any conversation into a tree you can navigate like a canvas.
+OpenYoke is an open-source **Ollama desktop GUI** and **private ChatGPT alternative**. Run open models locally via Ollama — no accounts, nothing leaves your machine — *or* bring your own API key to chat with **Claude, GPT, and Gemini** when you want a frontier model. Manage models, chat with streaming responses, and branch any conversation into a tree you can navigate like a canvas.
 
 ![License: MIT](https://img.shields.io/badge/License-MIT-14b8a6.svg)
 ![Platform](https://img.shields.io/badge/platform-macOS%20·%20Windows%20·%20Linux-4a5568)
@@ -40,7 +40,8 @@ Most local-LLM tools give you a plain chat box. OpenYoke gives you a **thinking 
 - 📚 **In-app model management** — browse open models (Llama, Qwen, Mistral, Gemma, Phi, DeepSeek, and more), pull them with progress, and remove them to reclaim disk.
 - 💾 **Your data, your folder** — pick where conversations and settings are saved; everything persists across restarts as plain JSON.
 - 🎨 **Minimal, Notion-inspired UI** — clean, compact, and out of your way.
-- 🧩 **Provider-ready architecture** — Ollama today, with a clean seam for embedded or cloud backends next.
+- 🔌 **Local *and* cloud — your choice.** Run open models locally with Ollama, or bring your own API key for **Anthropic (Claude)**, **OpenAI (and any OpenAI-compatible API — OpenRouter, Groq, etc.)**, and **Google Gemini**. Pick any model per question, all in the same branching UI. Keys are stored locally and sent only to the provider.
+- 🌐 **Web search for *any* model.** Toggle it on and OpenYoke searches the web itself and feeds cited results into the prompt — so even a local, offline-trained model can answer with current information. No search API key required.
 
 ## How branching works
 
@@ -100,6 +101,77 @@ cd src-tauri
 cargo test
 ```
 
+## Using OpenYoke
+
+### 1. First launch — choose a storage folder
+
+The first time you open OpenYoke it asks where to save your data. Enter an
+**absolute path** (e.g. `/Users/you/OpenYoke`) and click **Save & continue**.
+Your conversations and settings live there; you can change it later from the
+sidebar (**Change storage folder…**).
+
+### 2. Get a model to chat with
+
+You can use local models, cloud models, or both.
+
+**Local models (via Ollama)** — open the **Models** tab:
+- **Model library** lists open models pulled live from Ollama. Type in the
+  search box to filter, then click a size (e.g. `3B`) to download it — a progress
+  bar shows the pull.
+- Or use **Download a model** to pull any model by its exact name (e.g.
+  `llama3.2:3b`).
+- Downloaded models show under **Installed models**, where you can delete them to
+  reclaim disk.
+
+**Cloud models (bring your own key)** — in the sidebar, expand **Cloud API keys**,
+paste a key for **Anthropic**, **OpenAI**, and/or **Google Gemini** (OpenAI also
+takes an optional base URL for OpenRouter/Groq/etc.), then click **Save settings**.
+Keys are stored locally and only sent to that provider.
+
+### 3. Pick your model
+
+Use the **Active model** dropdown at the top of the sidebar. Models are grouped by
+provider (Ollama, Anthropic, OpenAI, Google). Your selection is remembered, and
+you can use a different model on different branches.
+
+### 4. Have a (branching) conversation
+
+The **Graph** tab is where you chat. A conversation is a tree of nodes, each node
+being one question + answer.
+
+- **Start:** click **New conversation** (sidebar) or **+ New thread** (side panel),
+  type in the **Ask the next question…** box, and hit **Ask**. Your question
+  becomes the first node and the answer streams in live.
+- **Continue a line of thought:** click the node you want to build on, then ask —
+  a new child node appears beneath it.
+- **Branch:** click an *earlier* node and ask something different. That node now
+  has two children — two independent directions. Each branch only ever sees the
+  path from the root down to itself, so alternatives never contaminate each other.
+- **Navigate the canvas:** drag the background to **pan**, scroll to **zoom**, and
+  drag a node to **reposition** it (positions are saved). Click a node to open its
+  full path transcript in the side panel.
+- **Delete:** remove a node and everything after it with **Delete node** in the
+  panel; delete a whole conversation by hovering it in the sidebar and clicking the
+  trash icon.
+
+### 5. Web search (on by default)
+
+The **🌐 Web** toggle in the composer is on by default. When it's on, OpenYoke
+searches the web for your question and feeds the results — with sources — into the
+prompt. This works with **any** model, including local ones, so an offline model
+can still answer with current information. Toggle it off for a plain answer.
+
+### 6. Tune the system prompt (optional)
+
+Expand **System prompt** in the sidebar to set an instruction applied to every
+model. Leave it blank to use the built-in default (which nudges thorough,
+well-formatted answers); paste your own to change how the assistant behaves. Click
+**Save settings** after editing.
+
+> **Tip:** answers render full Markdown — headings, lists, tables, and code
+> blocks. Everything is saved to your storage folder, so you can quit and pick up
+> exactly where you left off.
+
 ## Data & privacy
 
 On first launch OpenYoke asks you to choose a **storage folder**. Your conversations (full history and branch structure) and settings are saved there as JSON, so nothing is lost between sessions.
@@ -108,7 +180,7 @@ On first launch OpenYoke asks you to choose a **storage folder**. Your conversat
 - **A tiny pointer**: a `config.json` in the OS app-data dir remembers *where* your folder is — the only thing stored outside it.
 - **Model weights** are managed by Ollama in `~/.ollama/`, not by OpenYoke.
 
-Nothing is transmitted off your machine. OpenYoke only talks to your local Ollama instance.
+With **local models and web search off**, nothing leaves your machine. Anything that *does* go out is opt-in and goes only where you'd expect: prompts to a **cloud provider** if you select one of its models (using your key), and search queries to **DuckDuckGo** if you enable web search. There's no telemetry.
 
 ## Architecture
 
