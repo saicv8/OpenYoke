@@ -23,6 +23,33 @@
           <span>Catalog URL (optional)</span>
           <input id="catalog-url" type="text" placeholder="https://.../catalog.json" />
         </label>
+        <details class="cloud-keys">
+          <summary>Cloud API keys</summary>
+          <label class="field">
+            <span>Anthropic (Claude)</span>
+            <input id="anthropic-key" type="password" placeholder="sk-ant-…" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>OpenAI</span>
+            <input id="openai-key" type="password" placeholder="sk-…" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>OpenAI base URL (optional)</span>
+            <input id="openai-base" type="text" placeholder="https://api.openai.com/v1" />
+          </label>
+          <label class="field">
+            <span>Google Gemini</span>
+            <input id="google-key" type="password" placeholder="AIza…" autocomplete="off" />
+          </label>
+          <p class="cloud-hint">Keys are saved locally and sent only to the provider.</p>
+        </details>
+        <details class="cloud-keys">
+          <summary>System prompt</summary>
+          <label class="field">
+            <span>Applied to every model — blank uses the built-in default</span>
+            <textarea id="system-prompt" rows="5" placeholder="You are a helpful, knowledgeable assistant. Give clear, thorough, well-structured answers…"></textarea>
+          </label>
+        </details>
         <label class="field">
           <span>Storage folder</span>
           <input id="storage-path" type="text" readonly />
@@ -69,8 +96,11 @@
             <form id="node-form" class="composer">
               <textarea id="node-prompt" rows="3" placeholder="Ask the next question…"></textarea>
               <div class="panel-actions">
-                <button id="node-delete" class="danger hidden" type="button">Delete node</button>
-                <button id="node-send" class="primary" type="submit">Ask</button>
+                <button id="web-toggle" class="toggle" type="button" title="Search the web and use the results in the answer (works with any model)">🌐 Web</button>
+                <span class="panel-actions-right">
+                  <button id="node-delete" class="danger hidden" type="button">Delete node</button>
+                  <button id="node-send" class="primary" type="submit">Ask</button>
+                </span>
               </div>
             </form>
           </aside>

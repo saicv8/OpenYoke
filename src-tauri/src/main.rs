@@ -1,8 +1,13 @@
 // Prevent an extra console window on Windows in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod anthropic;
 mod catalog;
+mod google;
 mod ollama;
+mod openai;
+mod search;
+mod sse;
 mod storage;
 mod tree;
 
@@ -25,6 +30,11 @@ use storage::StorageStatus;
 
 const DEFAULT_BASE_URL: &str = "http://127.0.0.1:11434";
 
+/// Applied to every generation unless the user overrides it. The raw APIs ship
+/// with no system prompt, which makes answers terser than the vendor apps; this
+/// nudges models toward the thorough, well-formatted responses people expect.
+const DEFAULT_SYSTEM: &str = "You are a helpful, knowledgeable assistant. Give clear, thorough, well-structured answers. Use Markdown — headings, lists, tables, and fenced code blocks — wherever it improves clarity. Show your reasoning when it helps, and don't be needlessly terse. When web search results are provided, use them and cite sources by their [n] number.";
+
 #[derive(Serialize, Deserialize, Clone)]
 struct Settings {
     base_url: String,
@@ -32,6 +42,18 @@ struct Settings {
     /// Optional URL to refresh the model library from. Empty = bundled catalog.
     #[serde(default)]
     catalog_url: String,
+    /// Cloud provider API keys (stored locally, sent only to the provider).
+    #[serde(default)]
+    openai_key: String,
+    #[serde(default)]
+    openai_base_url: String,
+    #[serde(default)]
+    anthropic_key: String,
+    #[serde(default)]
+    google_key: String,
+    /// Applied to every model. Empty = use the built-in DEFAULT_SYSTEM.
+    #[serde(default)]
+    system_prompt: String,
 }
 
 impl Default for Settings {
@@ -40,6 +62,11 @@ impl Default for Settings {
             base_url: DEFAULT_BASE_URL.to_string(),
             default_model: String::new(),
             catalog_url: String::new(),
+            openai_key: String::new(),
+            openai_base_url: String::new(),
+            anthropic_key: String::new(),
+            google_key: String::new(),
+            system_prompt: String::new(),
         }
     }
 }
@@ -159,11 +186,21 @@ fn save_settings(
     base_url: String,
     default_model: String,
     catalog_url: String,
+    openai_key: String,
+    openai_base_url: String,
+    anthropic_key: String,
+    google_key: String,
+    system_prompt: String,
 ) -> Result<Settings, String> {
     let settings = Settings {
         base_url,
         default_model,
         catalog_url,
+        openai_key,
+        openai_base_url,
+        anthropic_key,
+        google_key,
+        system_prompt,
     };
     let body = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
     write_atomic(&settings_path(&app)?, &body)?;
@@ -203,6 +240,7 @@ async fn create_node(
     parent_id: Option<u64>,
     question: String,
     model: String,
+    web_search: bool,
     x: f64,
     y: f64,
 ) -> Result<Value, String> {
@@ -223,13 +261,60 @@ async fn create_node(
     }
 
     let path = tree::ancestor_path(&nodes, parent_id);
-    let messages = tree::build_chat_messages(&path, &question);
+
+    // Optional web search: OpenYoke searches and injects the results into the
+    // prompt we SEND, while the node still stores the user's ORIGINAL question.
+    // This is provider-agnostic, so it works for local and cloud models alike.
+    // Any search failure degrades gracefully to a normal (unaugmented) prompt.
+    let effective_question = if web_search {
+        match search::web_search(&question).await {
+            Ok(results) if !results.is_empty() => format!(
+                "{}Answer the following using the results above where relevant:\n\n{}",
+                search::format_context(&results),
+                question
+            ),
+            _ => question.clone(),
+        }
+    } else {
+        question.clone()
+    };
+    let messages = tree::build_chat_messages(&path, &effective_question);
 
     // The one and only generation call. Tokens stream to the frontend over
     // `channel` as they arrive; the full text is returned when done. Transport
     // errors abort before any node is created; an empty reply still persists
     // (the interaction happened). NO lock is held across this await.
-    let answer = ollama::chat_stream(&base_url, &model, &messages, &channel).await?;
+    //
+    // The model is `provider:id`; route to the right backend. Bare ids (no
+    // recognized prefix) fall through to Ollama for backward compatibility.
+    let settings = read_settings(&app)?;
+    let system = if settings.system_prompt.trim().is_empty() {
+        DEFAULT_SYSTEM
+    } else {
+        settings.system_prompt.as_str()
+    };
+    let answer = match model.split_once(':') {
+        Some(("anthropic", id)) => {
+            if settings.anthropic_key.trim().is_empty() {
+                return Err("No Anthropic API key set — add it under Cloud API keys.".to_string());
+            }
+            anthropic::chat_stream(&settings.anthropic_key, id, system, &messages, &channel).await?
+        }
+        Some(("openai", id)) => {
+            if settings.openai_key.trim().is_empty() {
+                return Err("No OpenAI API key set — add it under Cloud API keys.".to_string());
+            }
+            openai::chat_stream(&settings.openai_base_url, &settings.openai_key, id, system, &messages, &channel).await?
+        }
+        Some(("google", id)) => {
+            if settings.google_key.trim().is_empty() {
+                return Err("No Google API key set — add it under Cloud API keys.".to_string());
+            }
+            google::chat_stream(&settings.google_key, id, system, &messages, &channel).await?
+        }
+        Some(("ollama", id)) => ollama::chat_stream(&base_url, id, system, &messages, &channel).await?,
+        _ => ollama::chat_stream(&base_url, &model, system, &messages, &channel).await?,
+    };
 
     // Critical section: serialize mint + write against other mutations. Holds
     // the lock across no `.await`, so the future stays Send.
@@ -349,6 +434,57 @@ async fn list_models(base_url: String) -> Result<Value, String> {
     ollama::list_models(&base_url).await
 }
 
+fn ollama_model_names(models: &Value) -> Vec<String> {
+    models
+        .get("models")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(String::from))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Aggregate models across every configured provider for the model picker.
+/// Each group is `{ provider, label, models: [id, …] }`; the frontend prefixes
+/// each id with its provider, so a chosen model is e.g. `anthropic:claude-…`.
+#[tauri::command]
+async fn list_all_models(app: AppHandle, base_url: String) -> Result<Value, String> {
+    let settings = read_settings(&app)?;
+    let mut groups: Vec<Value> = Vec::new();
+
+    let ollama = ollama::list_models(&base_url).await.unwrap_or_else(|_| json!({ "models": [] }));
+    groups.push(json!({
+        "provider": "ollama",
+        "label": "Ollama (local)",
+        "models": ollama_model_names(&ollama),
+    }));
+
+    if !settings.anthropic_key.trim().is_empty() {
+        let models = anthropic::list_models(&settings.anthropic_key)
+            .await
+            .unwrap_or_else(|_| anthropic::fallback());
+        groups.push(json!({ "provider": "anthropic", "label": "Anthropic (Claude)", "models": models }));
+    }
+
+    if !settings.openai_key.trim().is_empty() {
+        let models = openai::list_models(&settings.openai_base_url, &settings.openai_key)
+            .await
+            .unwrap_or_else(|_| openai::fallback());
+        groups.push(json!({ "provider": "openai", "label": "OpenAI-compatible", "models": models }));
+    }
+
+    if !settings.google_key.trim().is_empty() {
+        let models = google::list_models(&settings.google_key)
+            .await
+            .unwrap_or_else(|_| google::fallback());
+        groups.push(json!({ "provider": "google", "label": "Google Gemini", "models": models }));
+    }
+
+    Ok(json!({ "groups": groups }))
+}
+
 #[tauri::command]
 async fn pull_model(
     base_url: String,
@@ -385,6 +521,7 @@ fn main() {
             rename_conversation,
             delete_conversation,
             list_models,
+            list_all_models,
             pull_model,
             delete_model,
             fetch_catalog
