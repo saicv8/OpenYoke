@@ -214,10 +214,26 @@ button.danger-solid:hover {
 
 /* --- Conversation list ---------------------------------------------------- */
 
+/* Change-storage matches the new-conversation button: both are full-width
+   block actions, so they read as a pair. */
+#change-storage {
+  width: 100%;
+}
+
+/* Primary call-to-action: green, centered, with a leading + icon. */
 #new-conversation {
   width: 100%;
   margin-top: 8px;
-  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+}
+
+.btn-icon {
+  font-size: 15px;
+  line-height: 1;
+  font-weight: 600;
 }
 
 .conversation-list {
@@ -453,6 +469,21 @@ button.danger-solid:hover {
   box-shadow: 0 4px 14px rgba(15, 15, 15, 0.14);
 }
 
+/* The placeholder card shown while an answer streams in. Dashed and gently
+   pulsing so it reads as in-progress rather than as a finished node. */
+.gnode.pending {
+  border-style: dashed;
+  border-color: var(--accent);
+  animation: gnode-pulse 1.6s ease-in-out infinite;
+}
+@keyframes gnode-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.72; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gnode.pending { animation: none; }
+}
+
 .gnode-q {
   font-size: 13px;
   font-weight: 600;
@@ -474,6 +505,50 @@ button.danger-solid:hover {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
+
+/* Which model produced this node. Provider shows as a coloured dot; the id is
+   the label. Kept compact so it doesn't compete with the answer preview. */
+.gnode-model {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  margin-top: 7px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--hover);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.gnode-model .model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.model-dot {
+  flex-shrink: 0;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--model-color, var(--text-faint));
+}
+
+/* Per-turn model caption in the transcript. */
+.msg-model {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 2px 0 10px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+/* Provider tints, consumed by both the badge and the caption via --model-color. */
+.provider-ollama { --model-color: #14b8a6; }
+.provider-anthropic { --model-color: #d97757; }
+.provider-openai { --model-color: #10a37f; }
+.provider-google { --model-color: #4285f4; }
 
 .node-branch {
   position: absolute;
@@ -533,12 +608,6 @@ button.danger-solid:hover {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-#new-thread {
-  flex-shrink: 0;
-  font-size: 12px;
-  padding: 4px 8px;
 }
 
 .panel-transcript {

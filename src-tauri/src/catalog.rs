@@ -43,7 +43,16 @@ pub async fn fetch(url: Option<&str>) -> Value {
         Ok(models) if !models.is_empty() => {
             annotate(json!({ "version": 1, "models": models }), "live")
         }
-        _ => bundled(),
+        // Say why we degraded. A silent fallback is indistinguishable from
+        // "the library really does only have a handful of models".
+        Ok(_) => {
+            eprintln!("catalog: {LIBRARY_URL} parsed to 0 models (page markup changed?), using bundled catalog");
+            bundled()
+        }
+        Err(e) => {
+            eprintln!("catalog: could not fetch {LIBRARY_URL} ({e}), using bundled catalog");
+            bundled()
+        }
     }
 }
 
@@ -90,16 +99,24 @@ fn decode_entities(s: &str) -> String {
 /// Parse the `ollama.com/library` HTML into catalog model entries. Pure and
 /// unit-tested so a page change is caught by tests, not silently at runtime.
 ///
-/// Anchors on Ollama's `x-test-*` attributes (their own test hooks), which are
-/// more stable than CSS classes.
+/// Anchors on the `/library/<name>` link that each card is built around — the
+/// one part of the card that carries meaning rather than styling. Ollama used
+/// to ship `x-test-*` attributes and we keyed off those; they were removed in a
+/// redesign, which silently emptied this parser, so prefer structure over hooks.
 fn parse_library(html: &str) -> Vec<Value> {
-    let title_re = Regex::new(r#"x-test-model-title\s+title="([^"]+)""#).unwrap();
+    let title_re = Regex::new(r#"href="/library/([^"?#]+)"[^>]*class="group"#).unwrap();
     let desc_re =
         Regex::new(r#"(?s)<p class="max-w-lg break-words[^"]*"[^>]*>(.*?)</p>"#).unwrap();
-    let size_re = Regex::new(r#"x-test-size[^>]*>([^<]+)</span>"#).unwrap();
-    let cap_re = Regex::new(r#"x-test-capability[^>]*>([^<]+)</span>"#).unwrap();
+    // Sizes and capabilities are identical badge markup distinguished only by
+    // colour: sizes are blue, every other colour is a capability. Classifying
+    // by "not the size colour" means a newly introduced capability colour (as
+    // happened with `cloud`) still lands in tags instead of being dropped.
+    let badge_re =
+        Regex::new(r#"<span\s+class="inline-flex items-center rounded-md ([^"]*)">([^<]*)</span>"#)
+            .unwrap();
+    const SIZE_COLOR: &str = "#ddf4ff";
 
-    // Each model's block runs from its title marker to the next one.
+    // Each model's block runs from its link marker to the next one.
     let marks: Vec<(usize, String)> = title_re
         .captures_iter(html)
         .filter_map(|c| Some((c.get(0)?.start(), c.get(1)?.as_str().to_string())))
@@ -116,20 +133,24 @@ fn parse_library(html: &str) -> Vec<Value> {
             .map(|m| decode_entities(m.as_str().trim()))
             .unwrap_or_default();
 
-        let tags: Vec<Value> = cap_re
-            .captures_iter(block)
-            .filter_map(|c| c.get(1))
-            .map(|m| json!(m.as_str().trim()))
-            .collect();
-
-        let mut variants: Vec<Value> = size_re
-            .captures_iter(block)
-            .filter_map(|c| c.get(1))
-            .map(|m| {
-                let size = m.as_str().trim();
-                json!({ "tag": format!("{name}:{size}"), "label": size.to_uppercase() })
-            })
-            .collect();
+        let mut tags: Vec<Value> = Vec::new();
+        let mut variants: Vec<Value> = Vec::new();
+        for capture in badge_re.captures_iter(block) {
+            let (Some(class), Some(text)) = (capture.get(1), capture.get(2)) else {
+                continue;
+            };
+            let text = text.as_str().trim();
+            if text.is_empty() {
+                continue;
+            }
+            if class.as_str().contains(SIZE_COLOR) {
+                variants.push(
+                    json!({ "tag": format!("{name}:{text}"), "label": text.to_uppercase() }),
+                );
+            } else {
+                tags.push(json!(text));
+            }
+        }
         if variants.is_empty() {
             variants.push(json!({ "tag": name, "label": "latest" }));
         }
@@ -160,35 +181,45 @@ mod tests {
         assert_eq!(annotate(json!({ "models": [] }), "bundled")["source"], "bundled");
     }
 
+    /// Verbatim excerpt of live ollama.com/library markup, whitespace and all.
+    /// Copy a fresh card in here if the parser ever comes up empty again.
+    const LIBRARY_FIXTURE: &str = r#"
+    <ul role="list" class="grid grid-cols-1 gap-y-3">
+      <li  class="flex items-baseline border-b border-neutral-200 py-6">
+        <a href="/library/llama3.1" class="group w-full space-y-5">
+          <div  title="llama3.1" class="flex flex-col">
+            <h2 class="truncate text-xl font-medium underline-offset-2 md:text-2xl">
+              <div class="flex space-x-2 items-center">
+                <span class="group-hover:underline truncate">llama3.1</span>
+              </div>
+            </h2>
+            <p class="max-w-lg break-words text-neutral-800 text-md">Meta model &amp; friends.</p>
+          </div>
+          <div class="flex flex-col space-y-2">
+            <div class="flex flex-wrap space-x-2">
+              <span  class="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 sm:text-[13px]">tools</span>
+              <span  class="inline-flex items-center rounded-md bg-[#ddf4ff] px-2 py-0.5 text-xs font-medium text-blue-600 sm:text-[13px]">8b</span>
+              <span  class="inline-flex items-center rounded-md bg-[#ddf4ff] px-2 py-0.5 text-xs font-medium text-blue-600 sm:text-[13px]">70b</span>
+            </div>
+          </div>
+        </a>
+      </li>
+      <li  class="flex items-baseline border-b border-neutral-200 py-6">
+        <a href="/library/llava" class="group w-full space-y-5">
+          <div  title="llava" class="flex flex-col">
+            <p class="max-w-lg break-words text-neutral-800 text-md">A vision model.</p>
+          </div>
+          <div class="flex flex-wrap space-x-2">
+            <span  class="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 sm:text-[13px]">vision</span>
+            <span  class="inline-flex items-center rounded-md bg-[#ddf4ff] px-2 py-0.5 text-xs font-medium text-blue-600 sm:text-[13px]">7b</span>
+          </div>
+        </a>
+      </li>
+    </ul>"#;
+
     #[test]
     fn parse_library_extracts_models() {
-        // Mirrors the real ollama.com/library markup (x-test-* hooks).
-        let html = r#"
-        <li x-test-model class="flex">
-          <a href="/library/llama3.1" class="group">
-            <div x-test-model-title title="llama3.1" class="flex">
-              <p class="max-w-lg break-words text-neutral-800 text-md">Meta model &amp; friends.</p>
-            </div>
-            <div class="flex flex-wrap space-x-2">
-              <span x-test-capability class="x">tools</span>
-              <span x-test-size class="x">8b</span>
-              <span x-test-size class="x">70b</span>
-            </div>
-          </a>
-        </li>
-        <li x-test-model class="flex">
-          <a href="/library/llava" class="group">
-            <div x-test-model-title title="llava" class="flex">
-              <p class="max-w-lg break-words text-neutral-800 text-md">A vision model.</p>
-            </div>
-            <div class="flex flex-wrap space-x-2">
-              <span x-test-capability class="x">vision</span>
-              <span x-test-size class="x">7b</span>
-            </div>
-          </a>
-        </li>"#;
-
-        let models = parse_library(html);
+        let models = parse_library(LIBRARY_FIXTURE);
         assert_eq!(models.len(), 2);
         assert_eq!(models[0]["name"], "llama3.1");
         assert_eq!(models[0]["description"], "Meta model & friends."); // entity decoded
@@ -204,6 +235,36 @@ mod tests {
         assert_eq!(models[1]["variants"][0]["tag"], "llava:7b");
     }
 
+    /// Hits the network, so it is not part of the default run. This is the test
+    /// that would have caught the `x-test-*` removal — the fixture tests cannot,
+    /// because a fixture keeps passing long after the real page has moved on.
+    /// Run periodically: `cargo test -- --ignored`.
+    #[tokio::test]
+    #[ignore = "requires network"]
+    async fn parse_library_still_matches_the_live_page() {
+        let models = scrape_library().await.expect("fetch ollama.com/library");
+        assert!(models.len() > 50, "only parsed {} models", models.len());
+        assert!(
+            models.iter().all(|m| !m["description"].as_str().unwrap_or("").is_empty()),
+            "some models parsed with no description"
+        );
+        assert!(
+            models.iter().any(|m| m["name"] == "llama3.1"),
+            "expected a well-known model in the library"
+        );
+    }
+
+    /// End-to-end check on what the UI actually renders: an empty `catalog_url`
+    /// (the default) must reach the live scrape, not silently degrade to
+    /// `source: "bundled"` — which is the state this fixed.
+    #[tokio::test]
+    #[ignore = "requires network"]
+    async fn fetch_with_no_custom_url_serves_the_live_library() {
+        let catalog = fetch(Some("")).await;
+        assert_eq!(catalog["source"], "live");
+        assert!(catalog["models"].as_array().unwrap().len() > 50);
+    }
+
     #[test]
     fn parse_library_handles_no_matches() {
         assert!(parse_library("<html>no models here</html>").is_empty());
@@ -211,9 +272,22 @@ mod tests {
 
     #[test]
     fn parse_library_defaults_variant_when_no_sizes() {
-        let html = r#"<div x-test-model-title title="nomic-embed-text" class="x">
-            <p class="max-w-lg break-words text-md">Embeddings.</p></div>"#;
+        let html = r#"<a href="/library/nomic-embed-text" class="group w-full space-y-5">
+            <p class="max-w-lg break-words text-md">Embeddings.</p></a>"#;
         let models = parse_library(html);
         assert_eq!(models[0]["variants"], json!([{ "tag": "nomic-embed-text", "label": "latest" }]));
+    }
+
+    /// Ollama introduced a new badge colour for `cloud` after this parser was
+    /// written; anything that isn't the size colour must land in tags.
+    #[test]
+    fn parse_library_treats_unknown_badge_colour_as_capability() {
+        let html = r#"<a href="/library/kimi-k2" class="group w-full space-y-5">
+            <p class="max-w-lg break-words text-md">Big model.</p>
+            <span  class="inline-flex items-center rounded-md bg-cyan-50 px-2 py-0.5 text-xs font-medium text-cyan-600 sm:text-[13px]">cloud</span>
+            <span  class="inline-flex items-center rounded-md bg-[#ddf4ff] px-2 py-0.5 text-xs font-medium text-blue-600 sm:text-[13px]">1t</span></a>"#;
+        let models = parse_library(html);
+        assert_eq!(models[0]["tags"], json!(["cloud"]));
+        assert_eq!(models[0]["variants"], json!([{ "tag": "kimi-k2:1t", "label": "1T" }]));
     }
 }

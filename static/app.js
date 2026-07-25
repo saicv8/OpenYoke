@@ -13,7 +13,6 @@ const storagePathInput = document.getElementById('storage-path');
 const changeStorageButton = document.getElementById('change-storage');
 const modelSelect = document.getElementById('model-select');
 const refreshButton = document.getElementById('refresh-models');
-const saveSettingsButton = document.getElementById('save-settings');
 const newConversationButton = document.getElementById('new-conversation');
 const statusDiv = document.getElementById('status');
 const conversationList = document.getElementById('conversations');
@@ -39,7 +38,6 @@ const nodeForm = document.getElementById('node-form');
 const nodePrompt = document.getElementById('node-prompt');
 const nodeSend = document.getElementById('node-send');
 const nodeDelete = document.getElementById('node-delete');
-const newThreadButton = document.getElementById('new-thread');
 const webToggle = document.getElementById('web-toggle');
 const graphView = document.getElementById('view-graph');
 const nodePanel = document.getElementById('node-panel');
@@ -93,6 +91,8 @@ let currentConversationId = null;
 let conversationsCache = [];
 let installedNames = new Set();
 let savedDefaultModel = '';
+// Set when the saved model is missing at load; surfaced after boot finishes.
+let modelWarning = '';
 let webSearchOn = true; // web search on by default
 
 function baseUrl() {
@@ -102,6 +102,30 @@ function baseUrl() {
 function truncate(text, max) {
   const clean = (text || '').replace(/\s+/g, ' ').trim();
   return clean.length > max ? `${clean.slice(0, max)}…` : clean;
+}
+
+// Known provider prefixes. A model is stored as `provider:id`; anything without
+// one of these prefixes is a bare Ollama id from before providers were tagged.
+const PROVIDERS = { ollama: 'Ollama', anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google' };
+
+/// Split a stored `provider:id` into { provider, id } for display. The id itself
+/// can contain colons (`ollama:llama3.2:1b`), so only the FIRST segment is ever
+/// treated as the provider, and only when it's one we recognise.
+function splitModel(model) {
+  const raw = (model || '').trim();
+  if (!raw) return { provider: '', id: '' };
+  const colon = raw.indexOf(':');
+  const head = colon === -1 ? raw : raw.slice(0, colon);
+  if (colon !== -1 && PROVIDERS[head]) {
+    return { provider: head, id: raw.slice(colon + 1) };
+  }
+  return { provider: 'ollama', id: raw }; // bare id -> Ollama (backend default)
+}
+
+/// Short label for a node badge: just the model id (the provider shows as a
+/// coloured dot). Empty string when the node predates model tracking.
+function modelLabel(model) {
+  return splitModel(model).id;
 }
 
 // --- Minimal, self-contained markdown renderer ------------------------------
@@ -281,6 +305,10 @@ async function loadEverything() {
   await loadSettings();
   await fetchModels();
   await loadConversations();
+  // fetchModels' status line gets overwritten by the steps after it, so a
+  // warning about the saved model going missing is re-asserted last — it
+  // matters more than "Conversation N created."
+  if (modelWarning) statusDiv.textContent = modelWarning;
 }
 
 // ============================================================================
@@ -324,11 +352,24 @@ async function loadSettings() {
   }
 }
 
-async function saveSettings() {
+// --- Settings autosave ------------------------------------------------------
+//
+// Settings persist as they're edited; there is no Save button. Typing is
+// debounced so a write happens once the user pauses rather than on every
+// keystroke, and blur/Enter flushes immediately.
+
+const AUTOSAVE_DELAY = 600;
+let autosaveTimer = null;
+let autosaveFollowUp = {};
+
+async function persistSettings({ reloadModels = false, reloadCatalog = false } = {}) {
   try {
     await invoke('save_settings', {
       baseUrl: baseUrl(),
-      defaultModel: modelSelect.value || '',
+      // An empty picker (Ollama down, or no keys yet) must not wipe the stored
+      // model — autosave fires far more often than the old Save button, so this
+      // would otherwise erase the choice on an unrelated keystroke.
+      defaultModel: modelSelect.value || savedDefaultModel || '',
       catalogUrl: catalogUrlInput.value.trim(),
       openaiKey: openaiKeyInput.value.trim(),
       openaiBaseUrl: openaiBaseInput.value.trim(),
@@ -336,11 +377,30 @@ async function saveSettings() {
       googleKey: googleKeyInput.value.trim(),
       systemPrompt: systemPromptInput.value.trim(),
     });
+    savedDefaultModel = modelSelect.value || savedDefaultModel || '';
     statusDiv.textContent = 'Settings saved.';
-    await fetchModels(); // refresh the picker with any newly-configured providers
+    // Only re-query providers when a field that changes their result moved.
+    if (reloadModels) await fetchModels();
+    if (reloadCatalog) await renderCatalog();
   } catch (error) {
     statusDiv.textContent = `Could not save settings: ${error}`;
   }
+}
+
+/// Queue a save. Repeated edits collapse into one write, and the reload flags
+/// of everything typed during the window are merged so none are dropped.
+function scheduleAutosave(options) {
+  autosaveFollowUp = { ...autosaveFollowUp, ...options };
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(flushAutosave, AUTOSAVE_DELAY);
+}
+
+function flushAutosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = null;
+  const options = autosaveFollowUp;
+  autosaveFollowUp = {};
+  return persistSettings(options);
 }
 
 // ============================================================================
@@ -459,6 +519,32 @@ let edgesByParent = new Map(); // parentId -> [<path>]
 let selectedNodeId = null; // null = virtual root (new thread)
 let generating = false;
 
+// A placeholder node shown on the canvas while an answer streams in. Real ids
+// are positive (minted by the backend), so a negative id can never collide.
+//
+// It exists so the in-flight answer is anchored to something VISIBLE. Without
+// it the stream lived only in the side panel, and anything that re-rendered the
+// panel — clicking empty canvas, for one — detached the bubble mid-stream and
+// the answer appeared to vanish.
+const PENDING_ID = -1;
+let pendingNode = null;
+
+/// Remove the placeholder from the graph. Safe to call when there isn't one.
+function clearPendingNode() {
+  const edge = edgeByChild.get(PENDING_ID);
+  if (edge) {
+    const parentId = Number(edge.dataset.parent);
+    const siblings = edgesByParent.get(parentId);
+    if (siblings) edgesByParent.set(parentId, siblings.filter((p) => p !== edge));
+    edge.remove();
+    edgeByChild.delete(PENDING_ID);
+  }
+  cardById.get(PENDING_ID)?.remove();
+  cardById.delete(PENDING_ID);
+  nodeIndex.delete(PENDING_ID);
+  pendingNode = null;
+}
+
 // Gesture state
 let gesture = null; // 'pan' | 'drag' | null
 let dragNodeId = null;
@@ -518,9 +604,31 @@ function addNodeCard(node) {
   card.appendChild(branch);
   card.appendChild(q);
   card.appendChild(a);
+  const badge = modelBadge(node.model);
+  if (badge) card.appendChild(badge);
   world.appendChild(card);
   cardById.set(node.id, card);
   return card;
+}
+
+/// A small "● model-id" chip identifying which model produced a node, tinted by
+/// provider. Returns null for nodes with no recorded model (pre-tracking data).
+function modelBadge(model) {
+  const { provider, id } = splitModel(model);
+  if (!id) return null;
+  const badge = document.createElement('div');
+  badge.className = `gnode-model provider-${provider}`;
+  badge.title = `Answered by ${PROVIDERS[provider] || provider} · ${id}`;
+
+  const dot = document.createElement('span');
+  dot.className = 'model-dot';
+  const label = document.createElement('span');
+  label.className = 'model-name';
+  label.textContent = id;
+
+  badge.appendChild(dot);
+  badge.appendChild(label);
+  return badge;
 }
 
 function drawEdge(parent, child) {
@@ -624,6 +732,20 @@ function bubble(text, role) {
   return node;
 }
 
+/// A muted "● Provider · model-id" line shown under an answer in the transcript.
+/// Null for pre-tracking nodes with no recorded model.
+function modelCaption(model) {
+  const { provider, id } = splitModel(model);
+  if (!id) return null;
+  const caption = document.createElement('div');
+  caption.className = `msg-model provider-${provider}`;
+  const dot = document.createElement('span');
+  dot.className = 'model-dot';
+  caption.appendChild(dot);
+  caption.appendChild(document.createTextNode(`${PROVIDERS[provider] || provider} · ${id}`));
+  return caption;
+}
+
 function renderPanel() {
   transcript.innerHTML = '';
   nodeDelete.classList.toggle('hidden', selectedNodeId == null);
@@ -641,7 +763,19 @@ function renderPanel() {
   panelTitle.textContent = truncate(node ? node.question : 'Node', 40) || 'Node';
   displayPath(selectedNodeId).forEach((n) => {
     transcript.appendChild(bubble(n.question, 'user'));
-    transcript.appendChild(bubble(n.answer, 'assistant'));
+    const answer = bubble(n.answer, 'assistant');
+    // Tag the in-flight bubble so streaming tokens can find it again after any
+    // re-render — that's what lets the user click away and back without losing
+    // the live answer.
+    if (n.id === PENDING_ID) {
+      answer.classList.add('streaming');
+      if (!n.answer) answer.textContent = '…';
+    }
+    transcript.appendChild(answer);
+    // Caption each answer with the model that produced it — a thread can mix
+    // models turn to turn, so this isn't derivable from the active picker.
+    const caption = modelCaption(n.model);
+    if (caption) transcript.appendChild(caption);
   });
   transcript.scrollTop = transcript.scrollHeight;
 }
@@ -737,15 +871,16 @@ async function askNext(question) {
   nodeDelete.disabled = true;
   statusDiv.textContent = webSearchOn ? 'Searching the web…' : 'Generating…';
 
-  // Live transcript: drop any "new thread" hint, show the question, and a
-  // streaming assistant bubble that fills in as tokens arrive.
-  transcript.querySelector('.panel-hint')?.remove();
-  transcript.appendChild(bubble(question, 'user'));
-  const streamBubble = document.createElement('div');
-  streamBubble.className = 'message assistant';
-  streamBubble.textContent = '…';
-  transcript.appendChild(streamBubble);
-  transcript.scrollTop = transcript.scrollHeight;
+  // Put a placeholder card on the canvas straight away, so the pending answer
+  // is visible in the graph rather than living only in the side panel.
+  pendingNode = { id: PENDING_ID, parentId, question, answer: '', model, x: pos.x, y: pos.y };
+  addNodeCard(pendingNode);
+  cardById.get(PENDING_ID)?.classList.add('pending');
+  if (parentId != null) {
+    const parent = nodeIndex.get(parentId);
+    if (parent) drawEdge(parent, pendingNode);
+  }
+  selectNode(PENDING_ID); // renders the question + an empty streaming bubble
 
   // Accumulate tokens and repaint at most once per frame (markdown live-renders;
   // partial markdown just shows literally until it closes).
@@ -758,8 +893,19 @@ async function askNext(question) {
     renderQueued = true;
     requestAnimationFrame(() => {
       renderQueued = false;
-      streamBubble.innerHTML = renderMarkdown(acc) || '…';
-      transcript.scrollTop = transcript.scrollHeight;
+      if (!pendingNode) return; // generation ended (or the user switched away)
+      pendingNode.answer = acc;
+
+      const preview = cardById.get(PENDING_ID)?.querySelector('.gnode-a');
+      if (preview) preview.textContent = truncate(acc, 140) || '…';
+
+      // Re-query rather than holding a reference: renderPanel() rebuilds the
+      // transcript, so a captured element can be stale by now.
+      const live = transcript.querySelector('.message.assistant.streaming');
+      if (live) {
+        live.innerHTML = renderMarkdown(acc) || '…';
+        transcript.scrollTop = transcript.scrollHeight;
+      }
     });
   };
 
@@ -776,16 +922,36 @@ async function askNext(question) {
       channel,
     });
 
+    // Carry over a placeholder the user dragged while it was streaming, so the
+    // finished card doesn't jump back to where the request started.
+    const movedTo = pendingNode && (pendingNode.x !== pos.x || pendingNode.y !== pos.y)
+      ? { x: pendingNode.x, y: pendingNode.y }
+      : null;
+    if (movedTo) {
+      node.x = movedTo.x;
+      node.y = movedTo.y;
+    }
     patchNode(convId, node);
 
     // Only touch the canvas if the user hasn't switched conversations.
     if (convId === currentConversationId) {
+      const wasFollowingPending = selectedNodeId === PENDING_ID;
+      clearPendingNode();
       addNodeCard(node);
       if (node.parentId != null) {
         const parent = nodeIndex.get(node.parentId);
         if (parent) drawEdge(parent, node);
       }
-      selectNode(node.id);
+      // Follow through to the finished node only if the user was still watching
+      // it stream. If they clicked over to another card mid-generation, leave
+      // them where they are rather than yanking the panel away.
+      if (wasFollowingPending) selectNode(node.id);
+      else renderPanel();
+    }
+
+    if (movedTo) {
+      invoke('update_node_position', { conversationId: convId, nodeId: node.id, ...movedTo })
+        .catch((error) => { statusDiv.textContent = `Could not save position: ${error}`; });
     }
 
     if (wasEmpty) {
@@ -803,8 +969,21 @@ async function askNext(question) {
     // Keep the question in the box so the user can retry; roll the transcript
     // back to its pre-ask state (drops the half-streamed bubble).
     statusDiv.textContent = `Could not generate: ${error}`;
+    const wasFollowingPending = selectedNodeId === PENDING_ID;
+    clearPendingNode();
+    if (wasFollowingPending) {
+      // Fall back to the node we were branching from — never to "no selection"
+      // while the canvas still has nodes, which would re-open root-level
+      // creation. Only a genuinely empty canvas ends up unselected.
+      selectedNodeId = parentId != null && nodeIndex.has(parentId) ? parentId : null;
+      if (selectedNodeId == null && nodeIndex.size > 0) {
+        selectedNodeId = Math.max(...nodeIndex.keys());
+      }
+      cardById.get(selectedNodeId)?.classList.add('selected');
+    }
     if (convId === currentConversationId) renderPanel();
   } finally {
+    clearPendingNode(); // no-op on the paths that already cleared it
     generating = false;
     nodeSend.disabled = false;
     nodePrompt.disabled = false;
@@ -831,7 +1010,12 @@ async function deleteSelectedNode() {
     if (convId === currentConversationId) {
       selectedNodeId = null;
       renderGraph();
-      selectNode(parentId != null && nodeIndex.has(parentId) ? parentId : null);
+      // Land on the parent, else any surviving node. Leaving nothing selected
+      // while the canvas still has nodes would re-expose root-level creation,
+      // which is only allowed on an empty canvas.
+      let next = parentId != null && nodeIndex.has(parentId) ? parentId : null;
+      if (next == null && nodeIndex.size > 0) next = Math.max(...nodeIndex.keys());
+      selectNode(next);
     }
     statusDiv.textContent = `Deleted ${result.removedIds.length} node(s).`;
   } catch (error) {
@@ -914,7 +1098,10 @@ function onWindowMouseUp() {
   if (g === 'drag') {
     cardById.get(id)?.classList.remove('dragging');
     const node = nodeIndex.get(id);
-    if (wasMoved && node) {
+    if (wasMoved && node && id === PENDING_ID) {
+      // The placeholder has no backend row yet; its position is persisted once
+      // the real node arrives (see askNext).
+    } else if (wasMoved && node) {
       const convId = currentConversationId;
       invoke('update_node_position', {
         conversationId: convId,
@@ -939,7 +1126,11 @@ function onWindowMouseUp() {
       selectNode(id);
     }
   } else if (g === 'pan' && !wasMoved) {
-    selectNode(null); // click on empty canvas = new thread
+    // Clicking empty canvas is a no-op on selection: it used to deselect, which
+    // tore down the panel mid-stream and made the open conversation look lost.
+    // The one exception is an empty canvas, where "no selection" is the only
+    // state there is and the new-thread hint is what the user needs to see.
+    if (nodeIndex.size === 0) selectNode(null);
   }
 }
 
@@ -1024,6 +1215,7 @@ if (savedPanelWidth) setPanelWidth(savedPanelWidth);
 
 async function fetchModels() {
   statusDiv.textContent = 'Loading models...';
+  modelWarning = '';
   try {
     const data = await invoke('list_all_models', { baseUrl: baseUrl() });
     const groups = data.groups || [];
@@ -1048,11 +1240,25 @@ async function fetchModels() {
       });
       modelSelect.appendChild(optgroup);
     });
-    if (desired) modelSelect.value = desired; // keep/restore selection if still present
+    // Restore the saved choice. Assigning a value with no matching <option>
+    // silently blanks the select, so check before trusting it.
+    if (desired) modelSelect.value = desired;
+    const restored = modelSelect.value === desired;
+    if (!restored && total) modelSelect.selectedIndex = 0;
 
-    statusDiv.textContent = total
-      ? `Loaded ${total} models across ${groups.filter((g) => g.models && g.models.length).length} provider(s).`
-      : 'No models. Start Ollama or add an API key, then Refresh.';
+    const providers = groups.filter((g) => g.models && g.models.length).length;
+    if (!total) {
+      statusDiv.textContent = 'No models. Start Ollama or add an API key, then Refresh.';
+    } else if (desired && !restored) {
+      // Don't fail silently: the previous model is gone (uninstalled, or its
+      // provider lost its API key) and we've moved them onto another one.
+      modelWarning = `"${desired}" is no longer available — switched to ${modelSelect.value}.`;
+      statusDiv.textContent = modelWarning;
+      savedDefaultModel = modelSelect.value;
+      invoke('set_default_model', { model: modelSelect.value }).catch(() => {});
+    } else {
+      statusDiv.textContent = `Loaded ${total} models across ${providers} provider(s).`;
+    }
   } catch (error) {
     statusDiv.textContent = `Could not load models: ${error}`;
   }
@@ -1238,8 +1444,41 @@ catalogSearch.addEventListener('input', () => renderCatalogCards(catalogSearch.v
 // Wire up + boot
 // ============================================================================
 
+// Persist the model as soon as it's picked. Relying on "Save settings" meant a
+// switched model was lost on quit, since nothing else writes default_model.
+// This uses the single-field command rather than a full save, so picking a
+// model can't commit a half-typed API key sitting in another input.
+modelSelect.addEventListener('change', async () => {
+  savedDefaultModel = modelSelect.value;
+  try {
+    await invoke('set_default_model', { model: modelSelect.value });
+    statusDiv.textContent = 'Settings saved.';
+  } catch (error) {
+    statusDiv.textContent = `Could not save model choice: ${error}`;
+  }
+});
+
+// Every text setting autosaves. The flags say which caches a field invalidates:
+// provider credentials and the Ollama URL change the model list, the catalog
+// URL changes the library.
+[
+  [baseUrlInput, { reloadModels: true }],
+  [anthropicKeyInput, { reloadModels: true }],
+  [openaiKeyInput, { reloadModels: true }],
+  [openaiBaseInput, { reloadModels: true }],
+  [googleKeyInput, { reloadModels: true }],
+  [catalogUrlInput, { reloadCatalog: true }],
+  [systemPromptInput, {}],
+].forEach(([input, options]) => {
+  input.addEventListener('input', () => scheduleAutosave(options));
+  // Leaving the field (or pressing Enter) shouldn't wait out the debounce.
+  input.addEventListener('change', () => {
+    scheduleAutosave(options);
+    flushAutosave();
+  });
+});
+
 refreshButton.addEventListener('click', fetchModels);
-saveSettingsButton.addEventListener('click', saveSettings);
 newConversationButton.addEventListener('click', createConversation);
 storageSaveButton.addEventListener('click', saveStorageDir);
 storageInput.addEventListener('keydown', (event) => {
@@ -1255,10 +1494,6 @@ nodeForm.addEventListener('submit', (event) => {
   askNext(nodePrompt.value);
 });
 nodeDelete.addEventListener('click', deleteSelectedNode);
-newThreadButton.addEventListener('click', () => {
-  selectNode(null);
-  nodePrompt.focus();
-});
 webToggle.addEventListener('click', () => {
   webSearchOn = !webSearchOn;
   webToggle.classList.toggle('active', webSearchOn);

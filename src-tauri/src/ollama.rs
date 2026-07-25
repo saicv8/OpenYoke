@@ -5,6 +5,8 @@
 //! these free functions to a `ModelProvider` trait with one impl per backend —
 //! the call sites in `main.rs` won't need to change shape.
 
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 use futures_util::StreamExt;
@@ -14,6 +16,96 @@ use tauri::ipc::Channel;
 
 fn normalize(base_url: &str) -> String {
     base_url.trim_end_matches('/').to_string()
+}
+
+// --- Context window sizing ---------------------------------------------------
+//
+// Ollama defaults to a small context and SILENTLY DISCARDS whatever doesn't fit
+// — from the front of the prompt, which is exactly where the conversation
+// history lives. Measured against a live instance: an ~8,000-token prompt was
+// processed as 2,050 tokens by default, and as 8,027 with `num_ctx` set. Left
+// unset, a long thread (or any answer with web results injected) loses its
+// earlier turns and the model appears to forget the conversation.
+//
+// So we size `num_ctx` to the prompt on every call, clamped to what the model
+// actually supports.
+
+/// Never ask for less than this, so short chats still have room to grow.
+const MIN_CTX: u64 = 4096;
+/// Ceiling used when a model's true maximum can't be determined.
+const FALLBACK_MAX_CTX: u64 = 32_768;
+/// Room reserved for the reply on top of the prompt estimate.
+const RESPONSE_HEADROOM: u64 = 2048;
+
+/// Conservative chars-per-token ratio. Real English averages ~4; we use 3 so
+/// the estimate errs high — overshooting costs a little memory, undershooting
+/// silently truncates the conversation, which is the bug being fixed.
+const CHARS_PER_TOKEN: u64 = 3;
+
+fn max_ctx_cache() -> &'static Mutex<HashMap<String, u64>> {
+    static CACHE: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Pull `<arch>.context_length` out of an `/api/show` payload. The key is
+/// prefixed with the architecture (`llama.`, `qwen2.`, …), so match on the
+/// suffix rather than enumerating architectures.
+pub fn parse_max_context(show: &Value) -> Option<u64> {
+    show.get("model_info")?
+        .as_object()?
+        .iter()
+        .find(|(k, _)| k.ends_with(".context_length"))
+        .and_then(|(_, v)| v.as_u64())
+}
+
+/// The model's maximum context, asked once per model and cached. Falls back to
+/// `FALLBACK_MAX_CTX` when Ollama can't tell us.
+async fn max_context(base_url: &str, model: &str) -> u64 {
+    if let Some(hit) = max_ctx_cache().lock().ok().and_then(|c| c.get(model).copied()) {
+        return hit;
+    }
+    let url = format!("{}/api/show", normalize(base_url));
+    let found = async {
+        let response = reqwest::Client::new()
+            .post(&url)
+            .json(&json!({ "model": model }))
+            .timeout(Duration::from_secs(10))
+            .send()
+            .await
+            .ok()?;
+        parse_max_context(&response.json::<Value>().await.ok()?)
+    }
+    .await
+    .unwrap_or(FALLBACK_MAX_CTX);
+
+    if let Ok(mut cache) = max_ctx_cache().lock() {
+        cache.insert(model.to_string(), found);
+    }
+    found
+}
+
+/// Estimated prompt size in tokens, from the assembled messages plus system.
+fn estimate_tokens(system: &str, messages: &[Value]) -> u64 {
+    let content: usize = messages
+        .iter()
+        .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+        .map(str::len)
+        .sum();
+    // A few tokens of chat-template scaffolding wrap every message.
+    let overhead = messages.len() as u64 * 8;
+    (content + system.len()) as u64 / CHARS_PER_TOKEN + overhead
+}
+
+/// Choose `num_ctx` for this request.
+///
+/// Rounded up to a power of two on purpose: Ollama reallocates the KV cache
+/// whenever the requested size changes, so snapping to a few discrete sizes
+/// keeps consecutive turns on the same allocation instead of paying that cost
+/// on every message.
+pub fn choose_num_ctx(system: &str, messages: &[Value], model_max: u64) -> u64 {
+    let needed = estimate_tokens(system, messages) + RESPONSE_HEADROOM;
+    let ceiling = model_max.max(MIN_CTX);
+    needed.next_power_of_two().clamp(MIN_CTX, ceiling)
 }
 
 /// Streamed progress for a model download, delivered to the frontend over a
@@ -118,10 +210,14 @@ pub async fn chat_stream(
     channel: &Channel<ChatChunk>,
 ) -> Result<String, String> {
     let url = format!("{}/api/chat", normalize(base_url));
+    let num_ctx = choose_num_ctx(system, messages, max_context(base_url, model).await);
     let payload = json!({
         "model": model,
         "messages": crate::sse::with_system(system, messages),
         "stream": true,
+        // Without this Ollama truncates the prompt and the thread loses its
+        // history. See the context-window notes at the top of this module.
+        "options": { "num_ctx": num_ctx },
     });
 
     let response = reqwest::Client::new()
@@ -272,6 +368,118 @@ pub async fn pull_model(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn msgs(contents: &[&str]) -> Vec<Value> {
+        contents.iter().map(|c| json!({ "role": "user", "content": c })).collect()
+    }
+
+    #[test]
+    fn choose_num_ctx_floors_at_min() {
+        assert_eq!(choose_num_ctx("sys", &msgs(&["hi"]), 131_072), MIN_CTX);
+    }
+
+    #[test]
+    fn choose_num_ctx_grows_with_the_prompt() {
+        // ~60k chars of web context is ~20k tokens; the window must cover it
+        // rather than letting Ollama silently drop the conversation history.
+        let big = "x".repeat(60_000);
+        let chosen = choose_num_ctx("sys", &msgs(&[&big]), 131_072);
+        assert!(chosen >= 20_000 + RESPONSE_HEADROOM, "chose only {chosen}");
+        assert!(chosen.is_power_of_two(), "{chosen} is not a power of two");
+    }
+
+    /// Never request more than the model can do — Ollama would either error or
+    /// waste the allocation.
+    #[test]
+    fn choose_num_ctx_clamps_to_model_maximum() {
+        let big = "x".repeat(200_000);
+        assert_eq!(choose_num_ctx("sys", &msgs(&[&big]), 8192), 8192);
+    }
+
+    /// A model reporting a tiny maximum must not push us below the floor.
+    #[test]
+    fn choose_num_ctx_min_wins_over_small_maximum() {
+        assert_eq!(choose_num_ctx("sys", &msgs(&["hi"]), 512), MIN_CTX);
+    }
+
+    #[test]
+    fn choose_num_ctx_counts_the_whole_thread_not_just_the_last_turn() {
+        let turn = "y".repeat(5_000);
+        let one = choose_num_ctx("sys", &msgs(&[&turn]), 131_072);
+        let many = choose_num_ctx("sys", &msgs(&[&turn, &turn, &turn, &turn, &turn]), 131_072);
+        assert!(many > one, "history ignored: {many} vs {one}");
+    }
+
+    #[test]
+    fn parse_max_context_reads_any_architecture_prefix() {
+        let show = json!({ "model_info": { "llama.context_length": 131_072 } });
+        assert_eq!(parse_max_context(&show), Some(131_072));
+        let show = json!({ "model_info": { "qwen2.context_length": 32_768 } });
+        assert_eq!(parse_max_context(&show), Some(32_768));
+    }
+
+    #[test]
+    fn parse_max_context_absent_is_none() {
+        assert_eq!(parse_max_context(&json!({ "model_info": {} })), None);
+        assert_eq!(parse_max_context(&json!({})), None);
+    }
+
+    /// The regression this sizing exists to prevent: with a large block of web
+    /// context ahead of the question, the model must still see the earlier
+    /// turns. Asserts on `prompt_eval_count` — the count Ollama reports for
+    /// what it ACTUALLY processed, which is how the truncation was found.
+    /// Run with `cargo test -- --ignored` (needs Ollama + llama3.2:1b).
+    #[tokio::test]
+    #[ignore = "requires a running Ollama with llama3.2:1b"]
+    async fn num_ctx_prevents_prompt_truncation() {
+        let base = "http://127.0.0.1:11434";
+        let model = "llama3.2:1b";
+        let system = "You are helpful.";
+        // ~60k chars of retrieved page text, as the aggressive web caps allow.
+        let web = "Lorem ipsum dolor sit amet. ".repeat(2_200);
+        let messages = vec![
+            json!({ "role": "user", "content": "I am building a bridge out of bamboo in Kerala." }),
+            json!({ "role": "assistant", "content": "A bamboo bridge in Kerala sounds great!" }),
+            json!({ "role": "user", "content": format!("{web}\n\nWhat material am I using?") }),
+        ];
+
+        let chosen = choose_num_ctx(system, &messages, max_context(base, model).await);
+        let sent = crate::sse::with_system(system, &messages);
+
+        // How many prompt tokens Ollama actually processed, with and without
+        // our sizing. Comparing the two is the proof; a fixed threshold would
+        // just encode this machine's tokenizer.
+        async fn processed(base: &str, model: &str, sent: &[Value], num_ctx: Option<u64>) -> u64 {
+            let mut options = json!({ "num_predict": 1 });
+            if let Some(n) = num_ctx {
+                options["num_ctx"] = json!(n);
+            }
+            let response = reqwest::Client::new()
+                .post(format!("{base}/api/chat"))
+                .json(&json!({ "model": model, "messages": sent, "stream": false, "options": options }))
+                .timeout(Duration::from_secs(300))
+                .send()
+                .await
+                .expect("ollama reachable");
+            response.json::<Value>().await.expect("json body")["prompt_eval_count"]
+                .as_u64()
+                .expect("prompt_eval_count")
+        }
+
+        let with_sizing = processed(base, model, &sent, Some(chosen)).await;
+        let default = processed(base, model, &sent, None).await;
+
+        assert!(
+            with_sizing > default * 4,
+            "sizing barely helped: {with_sizing} vs {default} tokens processed"
+        );
+        // The window must be able to hold the whole prompt, or the front of it
+        // (the conversation history) is silently discarded.
+        assert!(
+            chosen >= with_sizing,
+            "window {chosen} is smaller than the {with_sizing}-token prompt"
+        );
+    }
 
     #[test]
     fn parse_models_maps_name_and_size() {

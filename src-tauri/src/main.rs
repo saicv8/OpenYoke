@@ -207,6 +207,20 @@ fn save_settings(
     Ok(settings)
 }
 
+/// Persist ONLY the active model, leaving every other setting untouched.
+///
+/// The picker saves on every change, and a full `save_settings` would commit
+/// whatever half-typed API key or base URL happens to be sitting in the other
+/// inputs at that moment. Patching the stored settings avoids that.
+#[tauri::command]
+fn set_default_model(app: AppHandle, model: String) -> Result<Settings, String> {
+    let mut settings = read_settings(&app)?;
+    settings.default_model = model;
+    let body = serde_json::to_string_pretty(&settings).map_err(|e| e.to_string())?;
+    write_atomic(&settings_path(&app)?, &body)?;
+    Ok(settings)
+}
+
 #[tauri::command]
 fn list_conversations(app: AppHandle) -> Result<Value, String> {
     Ok(json!({ "conversations": read_conversations(&app)? }))
@@ -230,6 +244,112 @@ fn create_conversation(
 /// thread). The generation context is assembled IN THE BACKEND from the
 /// root->parent ancestor path, so a branch can never see its siblings. Returns
 /// the persisted node (with the model's answer).
+/// Route a chat to the backend named by the `provider:id` model string. Bare
+/// ids (no recognized prefix) fall through to Ollama for backward compatibility.
+async fn dispatch_chat(
+    base_url: &str,
+    model: &str,
+    settings: &Settings,
+    system: &str,
+    messages: &[Value],
+    channel: &Channel<ollama::ChatChunk>,
+) -> Result<String, String> {
+    match model.split_once(':') {
+        Some(("anthropic", id)) => {
+            if settings.anthropic_key.trim().is_empty() {
+                return Err("No Anthropic API key set — add it under Cloud API keys.".to_string());
+            }
+            anthropic::chat_stream(&settings.anthropic_key, id, system, messages, channel).await
+        }
+        Some(("openai", id)) => {
+            if settings.openai_key.trim().is_empty() {
+                return Err("No OpenAI API key set — add it under Cloud API keys.".to_string());
+            }
+            openai::chat_stream(&settings.openai_base_url, &settings.openai_key, id, system, messages, channel).await
+        }
+        Some(("google", id)) => {
+            if settings.google_key.trim().is_empty() {
+                return Err("No Google API key set — add it under Cloud API keys.".to_string());
+            }
+            google::chat_stream(&settings.google_key, id, system, messages, channel).await
+        }
+        Some(("ollama", id)) => ollama::chat_stream(base_url, id, system, messages, channel).await,
+        _ => ollama::chat_stream(base_url, model, system, messages, channel).await,
+    }
+}
+
+const QUERY_SYSTEM: &str = "You turn a user's message into a web search query. \
+Reply with ONLY the query — no quotes, no explanation, no prefix. \
+Keep it under 15 words. Drop conversational filler and keep the specific, \
+distinctive terms: names, projects, versions, error text. If the message names \
+a specific site, repo, or product, make that the focus of the query.";
+
+/// Distill the question into a search query using the same model that will
+/// answer. Best-effort by design: any failure, or a model that ignores the
+/// instruction and rambles, falls back to the raw question.
+async fn build_search_query(
+    base_url: &str,
+    model: &str,
+    settings: &Settings,
+    question: &str,
+) -> String {
+    // A sink channel: this generation is internal, so its tokens must not
+    // stream into the user's answer pane.
+    let sink: Channel<ollama::ChatChunk> = Channel::new(|_| Ok(()));
+    let messages = vec![json!({ "role": "user", "content": question })];
+
+    let raw = match dispatch_chat(base_url, model, settings, QUERY_SYSTEM, &messages, &sink).await {
+        Ok(text) => text,
+        Err(e) => {
+            eprintln!("search: query generation failed ({e}), searching the raw question");
+            return question.to_string();
+        }
+    };
+    sanitize_query(&raw).unwrap_or_else(|| question.to_string())
+}
+
+/// Salvage a usable query from a model's reply, or `None` if it doesn't look
+/// like one. Small models like to wrap the answer in quotes, prefix it with
+/// "Search query:", or add a sentence of commentary — take the first non-empty
+/// line and strip the decoration.
+fn sanitize_query(raw: &str) -> Option<String> {
+    // Reasoning models emit a <think> block first; the query follows it. Drop
+    // the whole block, not just its tags, or the reasoning becomes the query.
+    let body = match raw.rfind("</think>") {
+        Some(end) => &raw[end + "</think>".len()..],
+        None => raw,
+    };
+    let lines: Vec<&str> = body.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let first = lines.first()?;
+
+    // Small models often ignore "reply with ONLY the query" and answer with a
+    // newline-separated keyword list instead (llama3.2:1b reliably does). Taking
+    // only the first line there would search for a single word, so join them.
+    // A line of real prose is longer than a keyword, which tells the two apart:
+    // a trailing sentence of commentary means take the first line only.
+    const KEYWORD_MAX_WORDS: usize = 4;
+    let is_keyword_list =
+        lines.len() > 1 && lines.iter().all(|l| l.split_whitespace().count() <= KEYWORD_MAX_WORDS);
+    let joined = if is_keyword_list { lines.join(" ") } else { first.to_string() };
+
+    let cleaned = joined
+        .trim_start_matches("Search query:")
+        .trim_start_matches("Query:")
+        .trim()
+        .trim_matches(['"', '\'', '`'])
+        .trim()
+        .to_string();
+
+    // Overlong queries dilute the distinctive terms — the exact failure this
+    // whole function exists to prevent — so keep only the leading words.
+    const MAX_WORDS: usize = 15;
+    let words: Vec<&str> = cleaned.split_whitespace().take(MAX_WORDS).collect();
+    if words.is_empty() {
+        return None;
+    }
+    Some(words.join(" "))
+}
+
 #[tauri::command]
 async fn create_node(
     app: AppHandle,
@@ -262,18 +382,32 @@ async fn create_node(
 
     let path = tree::ancestor_path(&nodes, parent_id);
 
-    // Optional web search: OpenYoke searches and injects the results into the
-    // prompt we SEND, while the node still stores the user's ORIGINAL question.
-    // This is provider-agnostic, so it works for local and cloud models alike.
-    // Any search failure degrades gracefully to a normal (unaugmented) prompt.
+    let settings = read_settings(&app)?;
+    let system = if settings.system_prompt.trim().is_empty() {
+        DEFAULT_SYSTEM
+    } else {
+        settings.system_prompt.as_str()
+    };
+
+    // Optional web search: OpenYoke searches, RETRIEVES the result pages, and
+    // injects their text into the prompt we SEND, while the node still stores
+    // the user's ORIGINAL question. This is provider-agnostic, so it works for
+    // local and cloud models alike. Any failure along the way degrades
+    // gracefully to a normal (unaugmented) prompt.
     let effective_question = if web_search {
-        match search::web_search(&question).await {
-            Ok(results) if !results.is_empty() => format!(
+        // Ask the model to turn the question into a search query first. Feeding
+        // the raw question to a search engine buries the few terms that matter
+        // under a paragraph of prose and returns generic results.
+        let query = build_search_query(&base_url, &model, &settings, &question).await;
+        let results = search::search_and_retrieve(&query, &question).await;
+        if results.is_empty() {
+            question.clone()
+        } else {
+            format!(
                 "{}Answer the following using the results above where relevant:\n\n{}",
                 search::format_context(&results),
                 question
-            ),
-            _ => question.clone(),
+            )
         }
     } else {
         question.clone()
@@ -287,34 +421,7 @@ async fn create_node(
     //
     // The model is `provider:id`; route to the right backend. Bare ids (no
     // recognized prefix) fall through to Ollama for backward compatibility.
-    let settings = read_settings(&app)?;
-    let system = if settings.system_prompt.trim().is_empty() {
-        DEFAULT_SYSTEM
-    } else {
-        settings.system_prompt.as_str()
-    };
-    let answer = match model.split_once(':') {
-        Some(("anthropic", id)) => {
-            if settings.anthropic_key.trim().is_empty() {
-                return Err("No Anthropic API key set — add it under Cloud API keys.".to_string());
-            }
-            anthropic::chat_stream(&settings.anthropic_key, id, system, &messages, &channel).await?
-        }
-        Some(("openai", id)) => {
-            if settings.openai_key.trim().is_empty() {
-                return Err("No OpenAI API key set — add it under Cloud API keys.".to_string());
-            }
-            openai::chat_stream(&settings.openai_base_url, &settings.openai_key, id, system, &messages, &channel).await?
-        }
-        Some(("google", id)) => {
-            if settings.google_key.trim().is_empty() {
-                return Err("No Google API key set — add it under Cloud API keys.".to_string());
-            }
-            google::chat_stream(&settings.google_key, id, system, &messages, &channel).await?
-        }
-        Some(("ollama", id)) => ollama::chat_stream(&base_url, id, system, &messages, &channel).await?,
-        _ => ollama::chat_stream(&base_url, &model, system, &messages, &channel).await?,
-    };
+    let answer = dispatch_chat(&base_url, &model, &settings, system, &messages, &channel).await?;
 
     // Critical section: serialize mint + write against other mutations. Holds
     // the lock across no `.await`, so the future stays Send.
@@ -513,6 +620,7 @@ fn main() {
             set_storage_dir,
             load_settings,
             save_settings,
+            set_default_model,
             list_conversations,
             create_conversation,
             create_node,
@@ -533,6 +641,111 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `set_default_model` reads, patches one field, and writes back. If that
+    /// round-trip dropped anything, switching models in the picker would wipe
+    /// the user's API keys — so pin that it doesn't.
+    #[test]
+    fn patching_the_default_model_preserves_every_other_setting() {
+        let stored = Settings {
+            base_url: "http://example:1234".into(),
+            default_model: "ollama:llama3.2:1b".into(),
+            catalog_url: "https://example/catalog.json".into(),
+            openai_key: "sk-openai".into(),
+            openai_base_url: "https://openai.example".into(),
+            anthropic_key: "sk-ant".into(),
+            google_key: "goog".into(),
+            system_prompt: "be terse".into(),
+        };
+        let on_disk = serde_json::to_string_pretty(&stored).unwrap();
+
+        // Exactly what the command does between read and write.
+        let mut patched: Settings = serde_json::from_str(&on_disk).unwrap();
+        patched.default_model = "anthropic:claude-opus-4-8".into();
+        let rewritten: Settings =
+            serde_json::from_str(&serde_json::to_string_pretty(&patched).unwrap()).unwrap();
+
+        assert_eq!(rewritten.default_model, "anthropic:claude-opus-4-8");
+        assert_eq!(rewritten.base_url, "http://example:1234");
+        assert_eq!(rewritten.catalog_url, "https://example/catalog.json");
+        assert_eq!(rewritten.openai_key, "sk-openai");
+        assert_eq!(rewritten.openai_base_url, "https://openai.example");
+        assert_eq!(rewritten.anthropic_key, "sk-ant");
+        assert_eq!(rewritten.google_key, "goog");
+        assert_eq!(rewritten.system_prompt, "be terse");
+    }
+
+    /// A settings.json written before `default_model` existed must still load.
+    #[test]
+    fn settings_without_default_model_still_parse() {
+        let old = r#"{ "base_url": "http://127.0.0.1:11434", "default_model": "" }"#;
+        let settings: Settings = serde_json::from_str(old).unwrap();
+        assert_eq!(settings.default_model, "");
+        assert!(settings.anthropic_key.is_empty());
+    }
+
+    #[test]
+    fn sanitize_query_takes_a_bare_query() {
+        assert_eq!(sanitize_query("saicv8 OpenYoke github repo").unwrap(), "saicv8 OpenYoke github repo");
+    }
+
+    /// Small models rarely follow "reply with ONLY the query" exactly.
+    #[test]
+    fn sanitize_query_strips_model_decoration() {
+        assert_eq!(sanitize_query("\"saicv8 OpenYoke\"").unwrap(), "saicv8 OpenYoke");
+        assert_eq!(sanitize_query("Search query: saicv8 OpenYoke").unwrap(), "saicv8 OpenYoke");
+        assert_eq!(sanitize_query("Query: `saicv8 OpenYoke`").unwrap(), "saicv8 OpenYoke");
+        assert_eq!(
+            sanitize_query("saicv8 OpenYoke\n\nThis should find the repo.").unwrap(),
+            "saicv8 OpenYoke"
+        );
+    }
+
+    #[test]
+    fn sanitize_query_skips_reasoning_preamble() {
+        assert_eq!(
+            sanitize_query("<think>\nThe user wants...\n</think>\nsaicv8 OpenYoke").unwrap(),
+            "saicv8 OpenYoke"
+        );
+    }
+
+    /// Verbatim llama3.2:1b output for the GitHub question — it answers with a
+    /// keyword list, so taking the first line alone would search "openyoke".
+    #[test]
+    fn sanitize_query_joins_keyword_lists() {
+        assert_eq!(
+            sanitize_query("openyoke\ngithub\ngrowth\naudience").unwrap(),
+            "openyoke github growth audience"
+        );
+        assert_eq!(
+            sanitize_query("openyoke\nopen-source\nai\ngithub\nharness \nsaicv8").unwrap(),
+            "openyoke open-source ai github harness saicv8"
+        );
+    }
+
+    /// ...but a trailing sentence of commentary is prose, not a keyword, and
+    /// must not be swept into the query.
+    #[test]
+    fn sanitize_query_does_not_join_prose() {
+        assert_eq!(
+            sanitize_query("saicv8 OpenYoke github\nThis query should find the repo.").unwrap(),
+            "saicv8 OpenYoke github"
+        );
+    }
+
+    #[test]
+    fn sanitize_query_caps_length() {
+        let long = (1..=30).map(|i| format!("word{i}")).collect::<Vec<_>>().join(" ");
+        assert_eq!(sanitize_query(&long).unwrap().split_whitespace().count(), 15);
+    }
+
+    /// An empty reply is a worse query than the raw question, so reject it and
+    /// let the caller fall back.
+    #[test]
+    fn sanitize_query_rejects_junk() {
+        assert!(sanitize_query("").is_none());
+        assert!(sanitize_query("   \n  ").is_none());
+    }
 
     #[test]
     fn build_conversation_increments_id() {
