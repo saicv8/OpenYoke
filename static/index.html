@@ -56,10 +56,11 @@
         </label>
         <button id="change-storage" class="secondary">Change storage folder…</button>
         <div class="button-row">
-          <button id="refresh-models" class="primary">Refresh</button>
-          <button id="save-settings">Save settings</button>
+          <button id="refresh-models" class="secondary">Refresh models</button>
         </div>
-        <button id="new-conversation" class="secondary">New conversation</button>
+        <button id="new-conversation" class="primary">
+          <span class="btn-icon" aria-hidden="true">+</span>New conversation
+        </button>
         <div class="conversation-list">
           <h3>Conversations</h3>
           <div id="conversations"></div>
@@ -90,7 +91,6 @@
           <aside id="node-panel" class="node-panel">
             <div class="panel-head">
               <span id="panel-title">New thread</span>
-              <button id="new-thread" class="secondary" type="button">+ New thread</button>
             </div>
             <div id="panel-transcript" class="panel-transcript"></div>
             <form id="node-form" class="composer">
