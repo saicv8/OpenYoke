@@ -38,6 +38,7 @@ const nodeForm = document.getElementById('node-form');
 const nodePrompt = document.getElementById('node-prompt');
 const nodeSend = document.getElementById('node-send');
 const nodeDelete = document.getElementById('node-delete');
+const newThreadButton = document.getElementById('new-thread');
 const webToggle = document.getElementById('web-toggle');
 const graphView = document.getElementById('view-graph');
 const nodePanel = document.getElementById('node-panel');
@@ -519,6 +520,11 @@ let edgesByParent = new Map(); // parentId -> [<path>]
 let selectedNodeId = null; // null = virtual root (new thread)
 let generating = false;
 
+// Where the next unconnected root should land, set when a new thread is started
+// by double-clicking empty canvas so the root appears where the user clicked.
+// Null means "lay it out automatically" (the + New thread button's behaviour).
+let newRootPos = null;
+
 // A placeholder node shown on the canvas while an answer streams in. Real ids
 // are positive (minted by the backend), so a negative id can never collide.
 //
@@ -749,12 +755,16 @@ function modelCaption(model) {
 function renderPanel() {
   transcript.innerHTML = '';
   nodeDelete.classList.toggle('hidden', selectedNodeId == null);
+  // The button only makes sense when a node is selected — it's the way OUT of a
+  // thread into a fresh one. With nothing selected you're already composing a
+  // new thread, so it would be a no-op.
+  newThreadButton.classList.toggle('hidden', selectedNodeId == null);
 
   if (selectedNodeId == null) {
     panelTitle.textContent = 'New thread';
     const hint = document.createElement('div');
     hint.className = 'panel-hint';
-    hint.textContent = 'Starting a new thread from the root. Ask a question to create the first node.';
+    hint.textContent = 'Starting a new, unconnected thread. Ask a question to create its first node.';
     transcript.appendChild(hint);
     return;
   }
@@ -785,6 +795,17 @@ function selectNode(id) {
   selectedNodeId = id;
   if (id != null) cardById.get(id)?.classList.add('selected');
   renderPanel();
+}
+
+/// Start a new, unconnected thread: deselect so the next question becomes a
+/// root node. `pos` (world coords) pins where that root lands — passed when the
+/// thread is started by double-clicking empty canvas; null lays it out
+/// automatically beside any existing roots.
+function startNewThread(pos = null) {
+  if (generating) return; // can't retarget an in-flight generation
+  newRootPos = pos;
+  selectNode(null);
+  nodePrompt.focus();
 }
 
 // --- Load / render a conversation's tree ------------------------------------
@@ -863,12 +884,16 @@ async function askNext(question) {
   const parentId = selectedNodeId; // may be null (virtual root)
   const model = modelSelect.value;
   const wasEmpty = nodeIndex.size === 0;
-  const pos = placeChild(parentId);
+  // A root started by double-clicking the canvas lands where it was clicked;
+  // otherwise fall back to automatic layout. Consume it either way.
+  const pos = parentId == null && newRootPos ? newRootPos : placeChild(parentId);
+  newRootPos = null;
 
   generating = true;
   nodeSend.disabled = true;
   nodePrompt.disabled = true;
   nodeDelete.disabled = true;
+  newThreadButton.disabled = true;
   statusDiv.textContent = webSearchOn ? 'Searching the web…' : 'Generating…';
 
   // Put a placeholder card on the canvas straight away, so the pending answer
@@ -972,9 +997,10 @@ async function askNext(question) {
     const wasFollowingPending = selectedNodeId === PENDING_ID;
     clearPendingNode();
     if (wasFollowingPending) {
-      // Fall back to the node we were branching from — never to "no selection"
-      // while the canvas still has nodes, which would re-open root-level
-      // creation. Only a genuinely empty canvas ends up unselected.
+      // Fall back to the node we were branching from (or any surviving node)
+      // rather than dropping the user into a blank new-thread they didn't ask
+      // for. Starting a new thread is now an explicit action (button /
+      // double-click), so this stays a helpful default, not a hard rule.
       selectedNodeId = parentId != null && nodeIndex.has(parentId) ? parentId : null;
       if (selectedNodeId == null && nodeIndex.size > 0) {
         selectedNodeId = Math.max(...nodeIndex.keys());
@@ -988,6 +1014,7 @@ async function askNext(question) {
     nodeSend.disabled = false;
     nodePrompt.disabled = false;
     nodeDelete.disabled = false;
+    newThreadButton.disabled = false;
   }
 }
 
@@ -1164,6 +1191,19 @@ viewport.addEventListener('click', (e) => {
   selectNode(id);
   nodePrompt.focus();
 });
+
+// Double-clicking empty canvas starts a new thread positioned right there.
+viewport.addEventListener('dblclick', (e) => {
+  if (e.target.closest('.gnode')) return; // a card owns its own double-click
+  const rect = viewport.getBoundingClientRect();
+  // Screen point -> world coords: translate is applied outside the scale, so
+  // undo the pan first, then the zoom. Centre the card under the cursor.
+  const worldX = (e.clientX - rect.left - panX) / zoom - CARD_W / 2;
+  const worldY = (e.clientY - rect.top - panY) / zoom;
+  startNewThread({ x: worldX, y: worldY });
+});
+
+newThreadButton.addEventListener('click', () => startNewThread());
 
 // --- Resizable side panel ---------------------------------------------------
 
