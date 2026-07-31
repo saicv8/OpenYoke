@@ -610,6 +610,12 @@ button.danger-solid:hover {
   white-space: nowrap;
 }
 
+#new-thread {
+  flex-shrink: 0;
+  font-size: 12px;
+  padding: 4px 8px;
+}
+
 .panel-transcript {
   flex: 1;
   min-height: 0;
