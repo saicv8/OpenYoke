@@ -224,10 +224,23 @@ body {
 }
 
 .sidebar h1 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: var(--fs-lg);
   font-weight: 600;
   margin: 2px 4px 10px;
   letter-spacing: -0.01em;
+}
+
+/* The mark carries its own dark background, so it's rounded here rather than
+   sitting as a hard square against the sidebar. Fixed size: it must not shrink
+   while the sidebar animates its width. */
+.brand-mark {
+  flex-shrink: 0;
+  width: 22px;
+  height: 22px;
+  border-radius: 5px;
 }
 
 /* Theme switch: a three-way segmented pill (system / light / dark). */
@@ -745,6 +758,18 @@ button.danger-solid:hover {
   margin: 2px 0 10px;
   font-size: var(--fs-xs);
   color: var(--text-faint);
+}
+
+/* Marks an answer that stopped early. Sits between the text and the model
+   caption so it reads as part of that turn, not as a new one. */
+.msg-truncated {
+  margin: 2px 0 8px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--danger);
+  border-radius: 0 3px 3px 0;
+  background: var(--danger-soft);
+  font-size: var(--fs-sm);
+  color: var(--text-muted);
 }
 
 /* Provider tints, consumed by both the badge and the caption via --model-color. */

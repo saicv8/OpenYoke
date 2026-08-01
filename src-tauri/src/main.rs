@@ -253,7 +253,7 @@ async fn dispatch_chat(
     system: &str,
     messages: &[Value],
     channel: &Channel<ollama::ChatChunk>,
-) -> Result<String, String> {
+) -> Result<sse::Completion, String> {
     match model.split_once(':') {
         Some(("anthropic", id)) => {
             if settings.anthropic_key.trim().is_empty() {
@@ -299,7 +299,7 @@ async fn build_search_query(
     let messages = vec![json!({ "role": "user", "content": question })];
 
     let raw = match dispatch_chat(base_url, model, settings, QUERY_SYSTEM, &messages, &sink).await {
-        Ok(text) => text,
+        Ok(completion) => completion.text,
         Err(e) => {
             eprintln!("search: query generation failed ({e}), searching the raw question");
             return question.to_string();
@@ -423,6 +423,16 @@ async fn create_node(
     // recognized prefix) fall through to Ollama for backward compatibility.
     let answer = dispatch_chat(&base_url, &model, &settings, system, &messages, &channel).await?;
 
+    // A reply can end before the model was finished — an output cap, a filter,
+    // a dropped connection. Keep whatever text arrived (it's the interaction
+    // the user paid for) but record WHY it stops there, so the node isn't
+    // presented as a complete answer. With nothing to keep, it's just an error.
+    if let Some(reason) = &answer.cutoff {
+        if answer.text.trim().is_empty() {
+            return Err(format!("The reply was cut off before any text arrived — {reason}."));
+        }
+    }
+
     // Critical section: serialize mint + write against other mutations. Holds
     // the lock across no `.await`, so the future stays Send.
     let _guard = write_lock.lock().map_err(|_| "conversation lock poisoned".to_string())?;
@@ -439,15 +449,20 @@ async fn create_node(
     }
 
     let new_id = tree::next_node_id(&fresh_nodes);
-    let node = json!({
+    let mut node = json!({
         "id": new_id,
         "parentId": parent_id,
         "question": question,
-        "answer": answer,
+        "answer": answer.text,
         "model": model,
         "x": x,
         "y": y,
     });
+    // Only present on an incomplete answer, so existing nodes stay untouched
+    // and the frontend can treat its absence as "this one finished".
+    if let Some(reason) = answer.cutoff {
+        node["truncated"] = json!(reason);
+    }
 
     if !conversations[idx].get("nodes").map(Value::is_array).unwrap_or(false) {
         conversations[idx]["nodes"] = json!([]);

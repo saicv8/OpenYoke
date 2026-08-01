@@ -774,6 +774,16 @@ function bubble(text, role) {
   return node;
 }
 
+/// Shown under an answer that stopped early, so a half-written reply can't be
+/// mistaken for a complete one. Null for the normal case.
+function truncationNote(reason) {
+  if (!reason) return null;
+  const note = document.createElement('div');
+  note.className = 'msg-truncated';
+  note.textContent = `This answer is incomplete — ${reason}.`;
+  return note;
+}
+
 /// A muted "● Provider · model-id" line shown under an answer in the transcript.
 /// Null for pre-tracking nodes with no recorded model.
 function modelCaption(model) {
@@ -818,6 +828,8 @@ function renderPanel() {
       if (!n.answer) answer.textContent = '…';
     }
     transcript.appendChild(answer);
+    const note = truncationNote(n.truncated);
+    if (note) transcript.appendChild(note);
     // Caption each answer with the model that produced it — a thread can mix
     // models turn to turn, so this isn't derivable from the active picker.
     const caption = modelCaption(n.model);
@@ -950,6 +962,13 @@ async function askNext(question) {
   const channel = new Channel();
   channel.onmessage = (chunk) => {
     if (chunk.content) acc += chunk.content;
+    // Set only on the final chunk, and only when the reply ended early. Shown
+    // right away so the user isn't left wondering why the text stopped; the
+    // saved node carries the same reason for later.
+    if (chunk.error) {
+      statusDiv.textContent = `Reply cut off — ${chunk.error}.`;
+      if (pendingNode) pendingNode.truncated = chunk.error;
+    }
     if (renderQueued) return;
     renderQueued = true;
     requestAnimationFrame(() => {
@@ -1025,7 +1044,10 @@ async function askNext(question) {
     }
 
     nodePrompt.value = '';
-    statusDiv.textContent = 'Done.';
+    // Don't overwrite the cut-off notice with "Done." — it wasn't.
+    statusDiv.textContent = node.truncated
+      ? `Reply cut off — ${node.truncated}.`
+      : 'Done.';
   } catch (error) {
     // Keep the question in the box so the user can retry; roll the transcript
     // back to its pre-ask state (drops the half-streamed bubble).

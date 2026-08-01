@@ -1,5 +1,7 @@
 <div align="center">
 
+<img src="docs/logo.png" alt="OpenYoke" width="96" height="96">
+
 # OpenYoke
 
 ### A private, local-first desktop app for chatting with open-source AI models — with branching conversations you explore as a visual graph.
