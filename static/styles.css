@@ -1,9 +1,33 @@
 /* ==========================================================================
    OpenYoke — Notion-inspired minimal UI
-   Palette lives in :root; swap these tokens for a dark variant later.
+
+   Every colour is a token. The light palette lives in :root, the dark one in
+   the [data-theme='dark'] block below; appearance.js resolves the user's
+   choice (light / dark / follow-the-system) onto <html data-theme> before the
+   first paint, along with --font-scale and the sidebar state.
+
+   Text sizes are tokens too (--fs-*), all multiplied by --font-scale so the
+   "Text size" setting moves the whole UI at once. Nothing outside these blocks
+   should hard-code a colour or a font-size.
    ========================================================================== */
 
 :root {
+  --font-scale: 1;
+  --fs-xs: calc(11px * var(--font-scale));
+  --fs-sm: calc(12px * var(--font-scale));
+  --fs-code: calc(12.5px * var(--font-scale));
+  --fs-base: calc(13px * var(--font-scale));
+  --fs-md: calc(14px * var(--font-scale));
+  --fs-lg: calc(15px * var(--font-scale));
+  --fs-xl: calc(16px * var(--font-scale));
+
+  --sidebar-w: 260px;
+  /* Transcript/canvas split. The panel may take everything the canvas doesn't
+     need, so on any normal window it goes well past half. Mirrored in app.js. */
+  --panel-min: 280px;
+  --graph-min: 320px;
+  --resizer-w: 6px;
+
   --bg: #ffffff;
   --bg-canvas: #f7f7f5;
   --bg-sidebar: #fbfbfa;
@@ -18,19 +42,72 @@
   --accent: #14b8a6;
   --accent-hover: #0f9d90;
   --accent-soft: #e6f8f5;
+  --on-accent: #ffffff; /* text drawn on top of --accent */
   --danger: #e03e3e;
   --danger-soft: #fbeaea;
+  --danger-strong-hover: #c92f2f;
+  --on-danger: #ffffff;
   --ok: #3a7d44;
+  --ok-soft: #f1f9f3;
+  --ok-border: #cdead5;
+  --scrollbar-thumb: rgba(55, 53, 47, 0.18);
+  --scrollbar-thumb-hover: rgba(55, 53, 47, 0.32);
+  --grid-dot: rgba(55, 53, 47, 0.11);
+  --edge: #cfcfcb;
+  --hint-bg: rgba(255, 255, 255, 0.85);
+  --code-bg: #f1f1ef;
+  --code-text: #c7254e;
+  --overlay: rgba(15, 15, 15, 0.4);
   --radius: 6px;
   --radius-sm: 4px;
   --shadow-card: 0 1px 2px rgba(15, 15, 15, 0.06);
   --shadow-pop: 0 8px 28px rgba(15, 15, 15, 0.12);
+  --shadow-drag: 0 4px 14px rgba(15, 15, 15, 0.14);
 
   color-scheme: light;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Inter', system-ui, sans-serif;
-  font-size: 14px;
+  font-size: var(--fs-md);
   color: var(--text);
   -webkit-font-smoothing: antialiased;
+}
+
+:root[data-theme='dark'] {
+  --bg: #191919;
+  --bg-canvas: #1c1c1b;
+  --bg-sidebar: #202020;
+  --surface: #242424;
+  --hover: rgba(255, 255, 255, 0.06);
+  --hover-strong: rgba(255, 255, 255, 0.1);
+  --border: #333331;
+  --border-strong: #4a4a47;
+  --text: #e4e4e2;
+  --text-muted: #9d9d99;
+  --text-faint: #7d7d79;
+  /* A lighter teal: the light-mode accent is too dim against a dark surface. */
+  --accent: #2dd4bf;
+  --accent-hover: #5eead4;
+  --accent-soft: rgba(45, 212, 191, 0.16);
+  --on-accent: #10201d; /* dark text reads better on the lighter accent */
+  --danger: #f87171;
+  --danger-soft: rgba(248, 113, 113, 0.14);
+  --danger-strong-hover: #ef4444;
+  --on-danger: #2a1010;
+  --ok: #4ade80;
+  --ok-soft: rgba(74, 222, 128, 0.12);
+  --ok-border: rgba(74, 222, 128, 0.35);
+  --scrollbar-thumb: rgba(255, 255, 255, 0.16);
+  --scrollbar-thumb-hover: rgba(255, 255, 255, 0.28);
+  --grid-dot: rgba(255, 255, 255, 0.09);
+  --edge: #3f3f3c;
+  --hint-bg: rgba(28, 28, 27, 0.85);
+  --code-bg: #2b2b2a;
+  --code-text: #ff9ba8;
+  --overlay: rgba(0, 0, 0, 0.55);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-pop: 0 8px 28px rgba(0, 0, 0, 0.55);
+  --shadow-drag: 0 4px 14px rgba(0, 0, 0, 0.5);
+
+  color-scheme: dark;
 }
 
 * {
@@ -50,13 +127,13 @@ body {
   height: 12px;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(55, 53, 47, 0.18);
+  background: var(--scrollbar-thumb);
   border-radius: 8px;
   border: 3px solid transparent;
   background-clip: content-box;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(55, 53, 47, 0.32);
+  background: var(--scrollbar-thumb-hover);
   background-clip: content-box;
 }
 
@@ -64,28 +141,137 @@ body {
 
 .app-shell {
   display: grid;
-  grid-template-columns: 260px 1fr;
+  /* `auto` lets the sidebar's own width — animated on collapse — drive the column. */
+  grid-template-columns: auto 1fr;
   height: 100vh;
 }
 
 .sidebar {
-  padding: 14px 12px;
+  width: var(--sidebar-w);
   border-right: 1px solid var(--border);
   background: var(--bg-sidebar);
-  overflow-y: auto;
+  overflow: hidden;
   min-height: 0;
-  font-size: 13px;
+  transition: width 0.22s ease, border-right-width 0.22s ease;
+}
+
+/* Collapsed: the sidebar slides shut. The inner wrapper keeps its full width
+   throughout, so the content slides out of view instead of reflowing. The
+   border goes too — otherwise a 1px sliver of sidebar is left behind. */
+:root[data-sidebar='collapsed'] .sidebar {
+  width: 0;
+  border-right-width: 0;
+}
+
+/* The conversation list scrolls; the Settings button stays pinned at the foot. */
+.sidebar-inner {
+  width: var(--sidebar-w);
+  height: 100%;
+  padding: 14px 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  font-size: var(--fs-base);
+}
+
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.sidebar-foot {
+  flex-shrink: 0;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 7px 8px;
+}
+.settings-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.settings-button svg {
+  width: 15px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+/* Hide only once the slide has finished, so the panel isn't focusable while
+   closed but still animates on the way out. */
+:root[data-sidebar='collapsed'] .sidebar-inner {
+  visibility: hidden;
+  transition: visibility 0s linear 0.22s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar {
+    transition: none;
+  }
+  :root[data-sidebar='collapsed'] .sidebar-inner {
+    transition: none;
+  }
 }
 
 .sidebar h1 {
-  font-size: 15px;
+  font-size: var(--fs-lg);
   font-weight: 600;
   margin: 2px 4px 10px;
   letter-spacing: -0.01em;
 }
 
-.sidebar > p {
-  font-size: 12px;
+/* Theme switch: a three-way segmented pill (system / light / dark). */
+
+.theme-toggle {
+  flex-shrink: 0;
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-canvas);
+}
+
+.theme-option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 23px;
+  height: 21px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-faint);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+.theme-option:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.theme-option[aria-pressed='true'] {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-card);
+}
+.theme-option svg {
+  width: 13px;
+  height: 13px;
+  display: block;
+}
+
+.sidebar-scroll > p {
+  font-size: var(--fs-sm);
   color: var(--text-muted);
   margin: 0 4px 14px;
   line-height: 1.4;
@@ -112,7 +298,7 @@ input,
 select,
 textarea {
   width: 100%;
-  font-size: 13px;
+  font-size: var(--fs-base);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   padding: 6px 8px;
@@ -143,7 +329,7 @@ input[readonly] {
 }
 
 .field span {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 500;
   color: var(--text-muted);
   padding-left: 2px;
@@ -152,7 +338,7 @@ input[readonly] {
 /* Buttons: bordered-neutral by default; primary/secondary/danger variants */
 
 button {
-  font-size: 13px;
+  font-size: var(--fs-base);
   cursor: pointer;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -169,7 +355,7 @@ button:hover {
 button.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 500;
 }
 button.primary:hover {
@@ -191,14 +377,14 @@ button.danger:hover {
 }
 
 button.danger-solid {
-  color: #fff;
+  color: var(--on-danger);
   background: var(--danger);
   border-color: var(--danger);
   font-weight: 500;
 }
 button.danger-solid:hover {
-  background: #c92f2f;
-  border-color: #c92f2f;
+  background: var(--danger-strong-hover);
+  border-color: var(--danger-strong-hover);
 }
 
 .button-row {
@@ -214,12 +400,6 @@ button.danger-solid:hover {
 
 /* --- Conversation list ---------------------------------------------------- */
 
-/* Change-storage matches the new-conversation button: both are full-width
-   block actions, so they read as a pair. */
-#change-storage {
-  width: 100%;
-}
-
 /* Primary call-to-action: green, centered, with a leading + icon. */
 #new-conversation {
   width: 100%;
@@ -231,7 +411,7 @@ button.danger-solid:hover {
 }
 
 .btn-icon {
-  font-size: 15px;
+  font-size: var(--fs-lg);
   line-height: 1;
   font-weight: 600;
 }
@@ -241,7 +421,7 @@ button.danger-solid:hover {
 }
 
 .conversation-list h3 {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-faint);
@@ -256,7 +436,7 @@ button.danger-solid:hover {
   width: 100%;
   padding: 5px 6px 5px 8px;
   border-radius: var(--radius-sm);
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: var(--text);
   margin: 1px 0;
   cursor: pointer;
@@ -297,38 +477,9 @@ button.danger-solid:hover {
 }
 
 .status {
-  margin-top: 14px;
+  margin-bottom: 6px;
   padding: 0 4px;
-  font-size: 12px;
-  color: var(--text-faint);
-  line-height: 1.4;
-}
-
-.cloud-keys {
-  margin: 10px 0;
-}
-.cloud-keys > summary {
-  cursor: pointer;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--text-muted);
-  padding: 4px 2px;
-  list-style: none;
-  user-select: none;
-}
-.cloud-keys > summary::before {
-  content: '▸';
-  display: inline-block;
-  margin-right: 6px;
-  color: var(--text-faint);
-  transition: transform 0.12s ease;
-}
-.cloud-keys[open] > summary::before {
-  transform: rotate(90deg);
-}
-.cloud-hint {
-  margin: 6px 2px 0;
-  font-size: 11px;
+  font-size: var(--fs-sm);
   color: var(--text-faint);
   line-height: 1.4;
 }
@@ -337,9 +488,46 @@ button.danger-solid:hover {
 
 .tabs {
   display: flex;
+  align-items: center;
   gap: 2px;
   padding: 8px 12px 0;
   border-bottom: 1px solid var(--border);
+}
+
+/* Sidebar handle. It lives in the tab strip rather than in the sidebar so the
+   same control opens and closes it — there's nothing to click on a shut panel. */
+.sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 26px;
+  height: 24px;
+  margin: 0 6px 8px 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+}
+.sidebar-toggle:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+.sidebar-toggle svg {
+  width: 15px;
+  height: 15px;
+  display: block;
+}
+/* Fill the handle's left column while the sidebar is open, so the icon reads as
+   a state rather than just a button. */
+.sidebar-toggle .panel-fill {
+  fill: currentColor;
+  stroke: none;
+  opacity: 0.35;
+  transition: opacity 0.16s ease;
+}
+:root[data-sidebar='collapsed'] .sidebar-toggle .panel-fill {
+  opacity: 0;
 }
 
 .tab {
@@ -380,9 +568,23 @@ button.danger-solid:hover {
 
 /* --- Graph view ----------------------------------------------------------- */
 
+/* Transcript first, then the drag handle, then the canvas: reading and typing
+   sit on the left, the tree spreads out into the remaining space on the right.
+
+   The panel's width is whatever the user dragged it to, bounded here rather
+   than only in JS: clamping against the row's own width means the canvas keeps
+   --graph-min even when the sidebar opens underneath an already-wide panel.
+   app.js mirrors these three values so the drag stops in the same place. */
 .graph-view {
   display: grid;
-  grid-template-columns: 1fr 6px var(--panel-width, 380px);
+  grid-template-columns:
+    clamp(
+      var(--panel-min),
+      var(--panel-width, 380px),
+      calc(100% - var(--graph-min) - var(--resizer-w))
+    )
+    var(--resizer-w)
+    1fr;
   grid-template-rows: 1fr;
   min-height: 0;
 }
@@ -412,7 +614,7 @@ button.danger-solid:hover {
   position: relative;
   overflow: hidden;
   background-color: var(--bg-canvas);
-  background-image: radial-gradient(rgba(55, 53, 47, 0.11) 1px, transparent 1px);
+  background-image: radial-gradient(var(--grid-dot) 1px, transparent 1px);
   background-size: 22px 22px;
   cursor: grab;
 }
@@ -439,7 +641,7 @@ button.danger-solid:hover {
 
 .gedge {
   fill: none;
-  stroke: #cfcfcb;
+  stroke: var(--edge);
   stroke-width: 1.5;
 }
 
@@ -466,7 +668,7 @@ button.danger-solid:hover {
 .gnode.dragging {
   cursor: grabbing;
   z-index: 3;
-  box-shadow: 0 4px 14px rgba(15, 15, 15, 0.14);
+  box-shadow: var(--shadow-drag);
 }
 
 /* The placeholder card shown while an answer streams in. Dashed and gently
@@ -485,10 +687,11 @@ button.danger-solid:hover {
 }
 
 .gnode-q {
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   color: var(--text);
   margin-bottom: 4px;
+  padding-right: 16px; /* keeps the title clear of the branch button */
   line-height: 1.35;
   overflow: hidden;
   display: -webkit-box;
@@ -497,7 +700,7 @@ button.danger-solid:hover {
 }
 
 .gnode-a {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-faint);
   line-height: 1.4;
   overflow: hidden;
@@ -517,7 +720,7 @@ button.danger-solid:hover {
   padding: 2px 7px;
   border-radius: 999px;
   background: var(--hover);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-muted);
 }
 .gnode-model .model-name {
@@ -540,7 +743,7 @@ button.danger-solid:hover {
   align-items: center;
   gap: 6px;
   margin: 2px 0 10px;
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--text-faint);
 }
 
@@ -563,7 +766,7 @@ button.danger-solid:hover {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-faint);
-  font-size: 15px;
+  font-size: var(--fs-lg);
 }
 .node-branch:hover {
   background: var(--hover-strong);
@@ -574,9 +777,9 @@ button.danger-solid:hover {
   position: absolute;
   bottom: 12px;
   left: 12px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-muted);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--hint-bg);
   border: 1px solid var(--border);
   padding: 5px 9px;
   border-radius: var(--radius-sm);
@@ -603,7 +806,7 @@ button.danger-solid:hover {
 }
 
 #panel-title {
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -612,7 +815,7 @@ button.danger-solid:hover {
 
 #new-thread {
   flex-shrink: 0;
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: 4px 8px;
 }
 
@@ -628,14 +831,14 @@ button.danger-solid:hover {
 
 .panel-hint {
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: var(--fs-base);
   line-height: 1.5;
 }
 
 /* Chat bubbles: user = subtle pill; assistant = plain doc-like text */
 
 .message {
-  font-size: 14px;
+  font-size: var(--fs-md);
   line-height: 1.6;
   color: var(--text);
 }
@@ -681,7 +884,7 @@ button.danger-solid:hover {
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text-muted);
-  font-size: 12px;
+  font-size: var(--fs-sm);
   padding: 5px 10px;
 }
 .toggle:hover {
@@ -690,7 +893,7 @@ button.danger-solid:hover {
 .toggle.active {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 
 /* --- Rendered markdown inside assistant bubbles --------------------------- */
@@ -705,7 +908,7 @@ button.danger-solid:hover {
 .message h2,
 .message h3 {
   margin: 12px 0 6px;
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
   line-height: 1.3;
 }
@@ -723,12 +926,12 @@ button.danger-solid:hover {
   margin: 3px 0;
 }
 .message code {
-  background: #f1f1ef;
-  color: #c7254e;
+  background: var(--code-bg);
+  color: var(--code-text);
   border-radius: 3px;
   padding: 1px 5px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 12.5px;
+  font-size: var(--fs-code);
 }
 .message pre {
   background: var(--bg-canvas);
@@ -760,7 +963,7 @@ button.danger-solid:hover {
 .message table {
   border-collapse: collapse;
   width: 100%;
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 .message th,
 .message td {
@@ -791,7 +994,7 @@ button.danger-solid:hover {
 
 .models-section h2 {
   margin: 0 0 10px;
-  font-size: 13px;
+  font-size: var(--fs-base);
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -817,12 +1020,12 @@ button.danger-solid:hover {
 
 .installed-item .meta {
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 
 .meta {
   color: var(--text-faint);
-  font-size: 13px;
+  font-size: var(--fs-base);
 }
 
 .pull-form {
@@ -841,7 +1044,7 @@ button.danger-solid:hover {
 }
 
 .pull-label {
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: var(--text-muted);
 }
 
@@ -869,7 +1072,7 @@ progress::-webkit-progress-value {
 }
 
 .catalog-source {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-faint);
 }
 
@@ -900,17 +1103,17 @@ progress::-webkit-progress-value {
 
 .catalog-card h3 {
   margin: 0;
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 600;
 }
 
 .catalog-card .publisher {
-  font-size: 12px;
+  font-size: var(--fs-sm);
   color: var(--text-faint);
 }
 
 .catalog-card .desc {
-  font-size: 13px;
+  font-size: var(--fs-base);
   color: var(--text-muted);
   line-height: 1.45;
   flex: 1;
@@ -927,15 +1130,15 @@ progress::-webkit-progress-value {
   color: var(--text);
   border: 1px solid var(--border);
   padding: 4px 9px;
-  font-size: 12px;
+  font-size: var(--fs-sm);
 }
 .variant-btn:hover {
   background: var(--hover);
 }
 .variant-btn.installed {
-  border-color: #cdead5;
+  border-color: var(--ok-border);
   color: var(--ok);
-  background: #f1f9f3;
+  background: var(--ok-soft);
   cursor: default;
 }
 
@@ -946,24 +1149,30 @@ progress::-webkit-progress-value {
 }
 
 .tag-chip {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   color: var(--accent);
   background: var(--accent-soft);
   padding: 2px 8px;
   border-radius: 999px;
 }
 
-/* --- Storage modal -------------------------------------------------------- */
+/* --- Modals --------------------------------------------------------------- */
 
 .modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(15, 15, 15, 0.4);
+  background: var(--overlay);
   backdrop-filter: blur(2px);
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 50;
+}
+
+/* Both of these can open from inside Settings, so they stack above it. */
+#storage-modal,
+#confirm-modal {
+  z-index: 60;
 }
 
 .modal {
@@ -980,20 +1189,20 @@ progress::-webkit-progress-value {
 
 .modal h2 {
   margin: 0;
-  font-size: 16px;
+  font-size: var(--fs-xl);
   font-weight: 600;
 }
 
 .modal p {
   margin: 0;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: var(--fs-base);
   line-height: 1.5;
 }
 
 .modal-error {
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--fs-base);
   min-height: 16px;
 }
 
@@ -1001,4 +1210,100 @@ progress::-webkit-progress-value {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* --- Settings dialog ------------------------------------------------------- */
+
+/* Taller and wider than the plain modals, and split into a fixed header, a
+   scrolling body, and a footer — the settings list outgrows short windows. */
+.modal-settings {
+  width: min(620px, 92vw);
+  max-height: 86vh;
+  padding: 0;
+  gap: 0;
+}
+/* It takes focus on open so screen readers land inside the dialog; that's not
+   a control, so it shouldn't draw a focus ring. */
+.modal-settings:focus {
+  outline: none;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.icon-button {
+  flex-shrink: 0;
+  border: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: var(--fs-base);
+  line-height: 1;
+  padding: 5px 7px;
+}
+.icon-button:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+.settings-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 20px;
+}
+
+.settings-group {
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.settings-group:last-child {
+  border-bottom: none;
+}
+
+.settings-group h3 {
+  margin: 0 0 8px;
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-faint);
+}
+
+/* A setting whose control sits inline on the right rather than under a label. */
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 4px 0 10px;
+}
+
+.settings-label {
+  font-size: var(--fs-base);
+  color: var(--text);
+}
+
+.settings-group .cloud-hint {
+  margin: 8px 2px 0;
+  font-size: var(--fs-xs);
+  color: var(--text-faint);
+  line-height: 1.4;
+}
+
+.settings-actions {
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+
+.settings-note {
+  font-size: var(--fs-sm);
+  color: var(--text-faint);
 }
