@@ -83,8 +83,44 @@ confirmCancel.addEventListener('click', () => closeConfirm(false));
 confirmModal.addEventListener('click', (event) => {
   if (event.target === confirmModal) closeConfirm(false); // click backdrop = cancel
 });
+
+// --- Settings dialog --------------------------------------------------------
+// Every field in here autosaves as it's edited, so opening and closing the
+// dialog is free — there's nothing to commit and nothing to discard.
+const settingsModal = document.getElementById('settings-modal');
+const settingsDialog = settingsModal.querySelector('.modal-settings');
+const openSettingsButton = document.getElementById('open-settings');
+const closeSettingsButton = document.getElementById('settings-close');
+const settingsDoneButton = document.getElementById('settings-done');
+
+function openSettings() {
+  settingsModal.classList.remove('hidden');
+  settingsDialog.focus(); // land inside the dialog without pre-selecting a field
+}
+
+function closeSettings() {
+  flushAutosave(); // don't sit on a pending debounce once it's out of sight
+  settingsModal.classList.add('hidden');
+  openSettingsButton.focus();
+}
+
+function settingsOpen() {
+  return !settingsModal.classList.contains('hidden');
+}
+
+openSettingsButton.addEventListener('click', openSettings);
+closeSettingsButton.addEventListener('click', closeSettings);
+settingsDoneButton.addEventListener('click', closeSettings);
+settingsModal.addEventListener('click', (event) => {
+  if (event.target === settingsModal) closeSettings(); // click backdrop = close
+});
+
+// Escape closes the topmost dialog. The storage gate is deliberately absent:
+// it's required, so there's nothing to escape to.
 document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !confirmModal.classList.contains('hidden')) closeConfirm(false);
+  if (event.key !== 'Escape') return;
+  if (!confirmModal.classList.contains('hidden')) closeConfirm(false);
+  else if (settingsOpen()) closeSettings();
 });
 
 // --- Shared state -----------------------------------------------------------
@@ -1207,15 +1243,28 @@ newThreadButton.addEventListener('click', () => startNewThread());
 
 // --- Resizable side panel ---------------------------------------------------
 
+// These three mirror --panel-min / --graph-min / --resizer-w in styles.css,
+// which enforces the same bounds on the rendered layout.
 const PANEL_MIN = 280;
+const GRAPH_MIN = 320; // the canvas keeps this much, and the panel gets the rest
+const RESIZER_W = 6;
 const PANEL_WIDTH_KEY = 'openyoke.panelWidth';
 let resizing = false;
 let resizeStartX = 0;
 let resizeStartWidth = 0;
 
+/// How wide the panel is allowed to get. The only real constraint is leaving a
+/// usable canvas, so measure the row the panel actually sits in — that already
+/// accounts for the sidebar being open or shut — and hand over everything past
+/// GRAPH_MIN. On any normal window this is well over half the width.
+function panelMaxWidth() {
+  // The Models tab hides the graph view, which measures 0; fall back to the window.
+  const row = graphView.getBoundingClientRect().width || window.innerWidth;
+  return Math.max(PANEL_MIN, row - RESIZER_W - GRAPH_MIN);
+}
+
 function clampPanelWidth(px) {
-  const max = Math.max(PANEL_MIN, Math.min(window.innerWidth * 0.6, 800));
-  return Math.min(max, Math.max(PANEL_MIN, px));
+  return Math.min(panelMaxWidth(), Math.max(PANEL_MIN, px));
 }
 
 function setPanelWidth(px) {
@@ -1233,8 +1282,8 @@ panelResizer.addEventListener('mousedown', (e) => {
 
 window.addEventListener('mousemove', (e) => {
   if (!resizing) return;
-  // The panel is on the right, so dragging the divider left widens it.
-  setPanelWidth(resizeStartWidth + (resizeStartX - e.clientX));
+  // The panel is on the left, so dragging the divider right widens it.
+  setPanelWidth(resizeStartWidth + (e.clientX - resizeStartX));
 });
 
 window.addEventListener('mouseup', () => {

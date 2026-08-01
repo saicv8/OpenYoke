@@ -39,7 +39,7 @@ Most local-LLM tools give you a plain chat box. OpenYoke gives you a **thinking 
 - ✍️ **Streaming responses** — tokens render live as the model generates, like the tools you already love.
 - 📚 **In-app model management** — browse open models (Llama, Qwen, Mistral, Gemma, Phi, DeepSeek, and more), pull them with progress, and remove them to reclaim disk.
 - 💾 **Your data, your folder** — pick where conversations and settings are saved; everything persists across restarts as plain JSON.
-- 🎨 **Minimal, Notion-inspired UI** — clean, compact, and out of your way.
+- 🎨 **Minimal, Notion-inspired UI** — clean, compact, and out of your way. **Light and dark themes** (explicit or following your system), an adjustable **text size**, and a sidebar you can slide shut with `⌘B` when you want the full window for thinking. Configuration lives in one **Settings** dialog and saves as you type.
 - 🔌 **Local *and* cloud — your choice.** Run open models locally with Ollama, or bring your own API key for **Anthropic (Claude)**, **OpenAI (and any OpenAI-compatible API — OpenRouter, Groq, etc.)**, and **Google Gemini**. Pick any model per question, all in the same branching UI. Keys are stored locally and sent only to the provider.
 - 🌐 **Web search for *any* model.** Toggle it on and OpenYoke searches the web itself and feeds cited results into the prompt — so even a local, offline-trained model can answer with current information. No search API key required.
 
@@ -107,8 +107,13 @@ cargo test
 
 The first time you open OpenYoke it asks where to save your data. Enter an
 **absolute path** (e.g. `/Users/you/OpenYoke`) and click **Save & continue**.
-Your conversations and settings live there; you can change it later from the
-sidebar (**Change storage folder…**).
+Your conversations and settings live there; you can change it later from
+**Settings → Storage**.
+
+> **Where are the settings?** Everything configurable — appearance, Ollama URL,
+> cloud API keys, system prompt, storage folder — is behind the **Settings**
+> button at the bottom of the sidebar. Changes save as you make them; there's no
+> Save button.
 
 ### 2. Get a model to chat with
 
@@ -123,10 +128,10 @@ You can use local models, cloud models, or both.
 - Downloaded models show under **Installed models**, where you can delete them to
   reclaim disk.
 
-**Cloud models (bring your own key)** — in the sidebar, expand **Cloud API keys**,
+**Cloud models (bring your own key)** — open **Settings → Cloud API keys** and
 paste a key for **Anthropic**, **OpenAI**, and/or **Google Gemini** (OpenAI also
-takes an optional base URL for OpenRouter/Groq/etc.), then click **Save settings**.
-Keys are stored locally and only sent to that provider.
+takes an optional base URL for OpenRouter/Groq/etc.). Keys save as you type, and
+are stored locally and only sent to that provider.
 
 ### 3. Pick your model
 
@@ -163,10 +168,9 @@ can still answer with current information. Toggle it off for a plain answer.
 
 ### 6. Tune the system prompt (optional)
 
-Expand **System prompt** in the sidebar to set an instruction applied to every
-model. Leave it blank to use the built-in default (which nudges thorough,
-well-formatted answers); paste your own to change how the assistant behaves. Click
-**Save settings** after editing.
+Open **Settings → System prompt** to set an instruction applied to every model.
+Leave it blank to use the built-in default (which nudges thorough, well-formatted
+answers); paste your own to change how the assistant behaves.
 
 > **Tip:** answers render full Markdown — headings, lists, tables, and code
 > blocks. Everything is saved to your storage folder, so you can quit and pick up
