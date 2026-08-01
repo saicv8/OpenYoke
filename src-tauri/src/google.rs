@@ -10,7 +10,7 @@ use serde_json::{json, Value};
 use tauri::ipc::Channel;
 
 use crate::ollama::ChatChunk;
-use crate::sse;
+use crate::sse::{self, Completion, Event};
 
 const API: &str = "https://generativelanguage.googleapis.com/v1beta";
 
@@ -57,13 +57,13 @@ pub async fn chat_stream(
     system: &str,
     messages: &[Value],
     channel: &Channel<ChatChunk>,
-) -> Result<String, String> {
+) -> Result<Completion, String> {
     let mut body = json!({ "contents": to_contents(messages) });
     if !system.trim().is_empty() {
         body["systemInstruction"] = json!({ "parts": [{ "text": system }] });
     }
     let url = format!("{API}/models/{model}:streamGenerateContent?alt=sse&key={key}");
-    let response = reqwest::Client::new()
+    let response = sse::streaming_client()?
         .post(&url)
         .json(&body)
         .send()
@@ -74,7 +74,7 @@ pub async fn chat_stream(
         let text = response.text().await.unwrap_or_default();
         return Err(format!("Gemini error ({status}): {text}"));
     }
-    sse::pipe_sse(response, delta, channel).await
+    sse::pipe_sse(response, classify, channel).await
 }
 
 /// Map `{role: user|assistant, content}` -> Gemini `{role: user|model, parts}`.
@@ -92,32 +92,88 @@ fn to_contents(messages: &[Value]) -> Vec<Value> {
         .collect()
 }
 
-fn delta(value: &Value) -> Option<String> {
-    let parts = value
-        .get("candidates")?
-        .get(0)?
-        .get("content")?
-        .get("parts")?
-        .as_array()?;
-    let text: String = parts
-        .iter()
-        .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
-        .collect();
-    if text.is_empty() {
-        None
-    } else {
-        Some(text)
+fn classify(value: &Value) -> Vec<Event> {
+    if let Some(message) = value.pointer("/error/message").and_then(|m| m.as_str()) {
+        return vec![Event::Failed(format!("Gemini: {message}"))];
     }
+    let candidate = match value.get("candidates").and_then(|c| c.get(0)) {
+        Some(candidate) => candidate,
+        None => return vec![],
+    };
+
+    let mut events = Vec::new();
+    let text: String = candidate
+        .pointer("/content/parts")
+        .and_then(|p| p.as_array())
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                .collect()
+        })
+        .unwrap_or_default();
+    if !text.is_empty() {
+        events.push(Event::Text(text));
+    }
+    // Gemini rides the finish reason on the same chunk as the final text, so
+    // both have to come out of one payload.
+    match candidate.get("finishReason").and_then(|r| r.as_str()) {
+        Some("STOP") => events.push(Event::Done),
+        Some("MAX_TOKENS") => events.push(Event::Cutoff(sse::OUTPUT_LIMIT.to_string())),
+        Some(other) => events.push(Event::Cutoff(format!("Gemini stopped the reply ({other})"))),
+        None => {}
+    }
+    events
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn texts(events: &[Event]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                Event::Text(t) => Some(t.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
     #[test]
     fn extracts_candidate_text() {
         let v = json!({ "candidates": [{ "content": { "parts": [{ "text": "Hi" }] } }] });
-        assert_eq!(delta(&v).as_deref(), Some("Hi"));
+        assert_eq!(texts(&classify(&v)), vec!["Hi".to_string()]);
+    }
+
+    /// The last chunk carries text AND the terminal signal; losing either one
+    /// costs a word of the answer or the ability to tell a clean end from a
+    /// dropped connection.
+    #[test]
+    fn final_chunk_yields_text_and_done() {
+        let v = json!({
+            "candidates": [{ "content": { "parts": [{ "text": "bye" }] }, "finishReason": "STOP" }]
+        });
+        match &classify(&v)[..] {
+            [Event::Text(text), Event::Done] => assert_eq!(text, "bye"),
+            other => panic!("expected text + done, got {} event(s)", other.len()),
+        }
+    }
+
+    #[test]
+    fn max_tokens_is_a_cutoff() {
+        let v = json!({ "candidates": [{ "finishReason": "MAX_TOKENS" }] });
+        assert!(matches!(classify(&v)[..], [Event::Cutoff(_)]));
+    }
+
+    /// SAFETY, RECITATION, and friends all mean the answer is incomplete.
+    #[test]
+    fn other_finish_reasons_are_cutoffs_too() {
+        let v = json!({ "candidates": [{ "finishReason": "SAFETY" }] });
+        match &classify(&v)[..] {
+            [Event::Cutoff(reason)] => assert!(reason.contains("SAFETY"), "{reason}"),
+            other => panic!("expected a cutoff, got {} event(s)", other.len()),
+        }
     }
 
     #[test]

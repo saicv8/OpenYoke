@@ -1,4 +1,16 @@
 <svg width="1024" height="1024" viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
-  <!-- Solid turquoise, rounded squircle with ~10% transparent padding (macOS style). -->
-  <rect x="100" y="100" width="824" height="824" rx="188" ry="188" fill="#14b8a6"/>
+  <!-- Build source for `npm run tauri icon src-tauri/icon-source.svg`.
+       Wraps the raw logo (icon-source.png, alongside this file) in the macOS
+       icon shape: an 824x824 body centred on a 1024 canvas, corner radius
+       185.4. macOS draws .icns artwork exactly as authored — it does NOT round
+       icons for you the way iOS does — so the rounding and the ~10% transparent
+       margin have to be baked in here or the app shows up as a hard square in
+       the Dock. -->
+  <defs>
+    <clipPath id="squircle">
+      <rect x="100" y="100" width="824" height="824" rx="185.4" ry="185.4"/>
+    </clipPath>
+  </defs>
+  <image href="icon-source.png" x="100" y="100" width="824" height="824"
+         preserveAspectRatio="xMidYMid slice" clip-path="url(#squircle)"/>
 </svg>

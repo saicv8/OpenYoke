@@ -122,11 +122,23 @@ pub struct PullProgress {
 
 /// One streamed piece of an assistant reply, delivered to the frontend over a
 /// Tauri channel so the UI can render tokens as they arrive.
+///
+/// `error` rides on the final chunk and is set only when the reply ended early
+/// — the frontend uses it to say so rather than presenting a half-written
+/// answer as finished.
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChatChunk {
     pub content: String,
     pub done: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+impl ChatChunk {
+    pub fn text(content: String) -> Self {
+        ChatChunk { content, done: false, error: None }
+    }
 }
 
 // --- Pure helpers (unit-tested below) ---------------------------------------
@@ -195,11 +207,22 @@ pub async fn list_models(base_url: &str) -> Result<Value, String> {
     }
 }
 
+/// Why a finished Ollama reply stopped, from the terminal NDJSON line. `length`
+/// means generation ran into the context window rather than finishing — the
+/// answer breaks off mid-sentence, so the user needs to be told.
+pub fn cutoff_reason(done_reason: Option<&str>) -> Option<String> {
+    match done_reason {
+        Some("length") => Some("the model ran out of room in its context window".to_string()),
+        _ => None,
+    }
+}
+
 /// Multi-turn chat, STREAMED. `messages` is a caller-assembled array of
 /// `{ "role", "content" }` objects (built in `tree::build_chat_messages` so the
 /// context-isolation invariant is enforced in the backend). Each NDJSON line
 /// from Ollama carries a token delta, which is forwarded over `channel` and
-/// accumulated. Returns the full assistant text once the stream completes.
+/// accumulated. Returns the full assistant text once the stream completes,
+/// along with a reason if it ended early.
 ///
 /// No total timeout: a long reply may legitimately take minutes to generate.
 pub async fn chat_stream(
@@ -208,7 +231,7 @@ pub async fn chat_stream(
     system: &str,
     messages: &[Value],
     channel: &Channel<ChatChunk>,
-) -> Result<String, String> {
+) -> Result<crate::sse::Completion, String> {
     let url = format!("{}/api/chat", normalize(base_url));
     let num_ctx = choose_num_ctx(system, messages, max_context(base_url, model).await);
     let payload = json!({
@@ -220,7 +243,7 @@ pub async fn chat_stream(
         "options": { "num_ctx": num_ctx },
     });
 
-    let response = reqwest::Client::new()
+    let response = crate::sse::streaming_client()?
         .post(&url)
         .json(&payload)
         .send()
@@ -236,8 +259,10 @@ pub async fn chat_stream(
     let mut stream = response.bytes_stream();
     let mut buffer: Vec<u8> = Vec::new();
     let mut full = String::new();
+    let mut cutoff: Option<String> = None;
+    let mut finished = false;
 
-    while let Some(chunk) = stream.next().await {
+    'read: while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| e.to_string())?;
         buffer.extend_from_slice(&chunk);
 
@@ -255,29 +280,35 @@ pub async fn chat_stream(
                 let delta = extract_chat_content(&value); // reuse: reads message.content
                 if !delta.is_empty() {
                     full.push_str(&delta);
-                    channel
-                        .send(ChatChunk { content: delta, done: false })
-                        .map_err(|e| e.to_string())?;
+                    channel.send(ChatChunk::text(delta)).map_err(|e| e.to_string())?;
+                }
+                // The terminal line. Without checking it, a stream that dies
+                // partway reads exactly like a completed answer.
+                if value.get("done").and_then(Value::as_bool).unwrap_or(false) {
+                    finished = true;
+                    cutoff = cutoff_reason(value.get("done_reason").and_then(|r| r.as_str()));
+                    break 'read;
                 }
             }
         }
     }
 
     // Flush a trailing line that wasn't newline-terminated.
-    if !buffer.is_empty() {
+    if !finished && !buffer.is_empty() {
         if let Ok(value) = serde_json::from_slice::<Value>(&buffer) {
             let delta = extract_chat_content(&value);
             if !delta.is_empty() {
                 full.push_str(&delta);
-                let _ = channel.send(ChatChunk { content: delta, done: false });
+                let _ = channel.send(ChatChunk::text(delta));
+            }
+            if value.get("done").and_then(Value::as_bool).unwrap_or(false) {
+                finished = true;
+                cutoff = cutoff_reason(value.get("done_reason").and_then(|r| r.as_str()));
             }
         }
     }
 
-    channel
-        .send(ChatChunk { content: String::new(), done: true })
-        .map_err(|e| e.to_string())?;
-    Ok(full)
+    crate::sse::finish(full, crate::sse::dropped_if_unfinished(finished, cutoff), channel)
 }
 
 pub async fn delete_model(base_url: &str, model: &str) -> Result<Value, String> {
@@ -504,6 +535,15 @@ mod tests {
     #[test]
     fn extract_chat_content_defaults_to_empty() {
         assert_eq!(extract_chat_content(&json!({})), "");
+    }
+
+    /// Running out of context stops generation mid-sentence. A normal stop
+    /// must not be reported the same way.
+    #[test]
+    fn cutoff_reason_flags_only_a_length_stop() {
+        assert!(cutoff_reason(Some("length")).is_some());
+        assert!(cutoff_reason(Some("stop")).is_none());
+        assert!(cutoff_reason(None).is_none());
     }
 
     #[test]
