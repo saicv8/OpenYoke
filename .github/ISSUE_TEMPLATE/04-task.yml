@@ -1,0 +1,42 @@
+name: 🔧 Maintenance task
+description: CI, refactoring, dependency bumps, tests, tooling. No user-facing change.
+title: "[Task]: "
+labels: ["type: task", "needs: triage"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What needs doing
+    validations: { required: true }
+  - type: textarea
+    id: why
+    attributes:
+      label: Why now
+      placeholder: "Blocking the v0.1.0 release / security advisory / build is flaky"
+    validations: { required: true }
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      # Keep these options in sync with .github/workflows/triage.yml (exact match).
+      options:
+        - Graph / branching canvas
+        - Ollama / local models
+        - Cloud providers (Anthropic / OpenAI / Gemini)
+        - Web search
+        - Streaming
+        - Storage / export
+        - Settings
+        - UI / theme / shortcuts
+        - Packaging / install / CI
+        - Docs
+    validations: { required: true }
+  - type: textarea
+    id: done
+    attributes:
+      label: Definition of done
+      value: |
+        - [ ] 
+        - [ ] `cargo test` passes
+        - [ ] CI green on macOS, Windows, Linux
+    validations: { required: true }

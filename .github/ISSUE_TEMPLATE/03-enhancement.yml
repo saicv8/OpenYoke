@@ -1,0 +1,36 @@
+name: ✨ Enhancement
+description: Improve something OpenYoke already does — faster, clearer, or nicer.
+title: "[Enhancement]: "
+labels: ["type: enhancement", "needs: triage"]
+body:
+  - type: textarea
+    id: current
+    attributes:
+      label: How it works today
+    validations: { required: true }
+  - type: textarea
+    id: proposed
+    attributes:
+      label: How it should work instead
+    validations: { required: true }
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      # Keep these options in sync with .github/workflows/triage.yml (exact match).
+      options:
+        - Graph / branching canvas
+        - Ollama / local models
+        - Cloud providers (Anthropic / OpenAI / Gemini)
+        - Web search
+        - Streaming
+        - Storage / export
+        - Settings
+        - UI / theme / shortcuts
+        - Packaging / install / CI
+        - Docs
+    validations: { required: true }
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

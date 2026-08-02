@@ -1,0 +1,146 @@
+# ═══════════════════════════════════════════════════════════════════
+# OpenYoke Issue Taxonomy — v1.0.0
+# Source of truth for all repository labels.
+#
+# RULES
+#   1. Edit only via pull request. CI syncs to GitHub on merge to main.
+#   2. NEVER rename a label that is in use. Deprecate it, add a new one.
+#   3. Every label needs a description — it is the enforcement mechanism.
+#   4. One colour per axis so the axis is recognisable at a glance.
+#   5. Hard cap: 40 labels. Adding one? Justify it in the PR body.
+#
+# AXES  type: (1) · area: (1 primary) · priority: (1) · size: (1)
+#       + transient gates, contributor signals, closure reasons
+# NOTE  Lifecycle (in progress / in review / done) is the Project
+#       board's Status field, NOT a label. Do not add status labels.
+# ═══════════════════════════════════════════════════════════════════
+
+# ── AXIS 1 · TYPE — what kind of work is this? (exactly one) ────────
+- name: "type: bug"
+  color: "D73A4A"
+  description: "Existing behavior is broken, incorrect, or crashes"
+- name: "type: feature"
+  color: "1D76DB"
+  description: "New user-facing capability that does not exist today"
+- name: "type: enhancement"
+  color: "A2EEEF"
+  description: "Improves something that already works"
+- name: "type: task"
+  color: "C5DEF5"
+  description: "Internal work: CI, refactor, deps, tests"
+- name: "type: docs"
+  color: "0075CA"
+  description: "Documentation only"
+- name: "type: epic"
+  color: "5319E7"
+  description: "Container for multiple stories; never implemented directly"
+
+# ── AXIS 2 · AREA — where in the product? (one primary) ─────────────
+- name: "area: graph"
+  color: "006B75"
+  description: "Branching canvas, nodes, edges, pan/zoom, context isolation"
+- name: "area: ollama"
+  color: "006B75"
+  description: "Local Ollama connection, model management, local inference"
+- name: "area: cloud-providers"
+  color: "006B75"
+  description: "Anthropic / OpenAI-compatible / Gemini integrations, key handling"
+- name: "area: web-search"
+  color: "006B75"
+  description: "Web-search toggle and search-augmented responses"
+- name: "area: streaming"
+  color: "006B75"
+  description: "Token streaming, cancellation, partial-response rendering"
+- name: "area: storage"
+  color: "006B75"
+  description: "Conversation JSON, storage folder, import/export, migration"
+- name: "area: settings"
+  color: "006B75"
+  description: "Settings dialog, preferences, config persistence"
+- name: "area: ui"
+  color: "006B75"
+  description: "Theme, typography, sidebar, dialogs, shortcuts, accessibility"
+- name: "area: packaging"
+  color: "006B75"
+  description: "Tauri build, installers, code signing, release CI"
+- name: "area: docs"
+  color: "006B75"
+  description: "README, CONTRIBUTING, VISION, ROADMAP, in-app copy"
+
+# ── AXIS 3 · PRIORITY — maintainer only ─────────────────────────────
+- name: "priority: P0"
+  color: "B60205"
+  description: "Data loss, won't launch, or API key exposed. Drop everything"
+- name: "priority: P1"
+  color: "D93F0B"
+  description: "Core flow broken with no workaround"
+- name: "priority: P2"
+  color: "FBCA04"
+  description: "Broken with a workaround, or a committed roadmap item"
+- name: "priority: P3"
+  color: "BFD4F2"
+  description: "Cosmetic, edge case, or nice-to-have. May sit indefinitely"
+
+# ── AXIS 4 · SIZE — rough effort ────────────────────────────────────
+- name: "size: XS"
+  color: "FEF2C0"
+  description: "Under 1 hour; one file, obvious fix"
+- name: "size: S"
+  color: "FEF2C0"
+  description: "Half a day; 1-2 files, no new architecture"
+- name: "size: M"
+  color: "FEF2C0"
+  description: "1-2 days; touches frontend and Rust backend"
+- name: "size: L"
+  color: "FEF2C0"
+  description: "About a week; new subsystem or cross-cutting change"
+- name: "size: XL"
+  color: "FEF2C0"
+  description: "Too large - must be split into stories before work starts"
+
+# ── GATES — transient. Remove the moment they're satisfied ──────────
+- name: "needs: triage"
+  color: "F29513"
+  description: "Auto-applied to new issues. Maintainer has not reviewed yet"
+- name: "needs: repro"
+  color: "F29513"
+  description: "Cannot reproduce; waiting on steps, version, or a recording"
+- name: "needs: info"
+  color: "F29513"
+  description: "Waiting on the reporter. Auto-closed after 14 days of silence"
+- name: "needs: design"
+  color: "F29513"
+  description: "UX or interaction unresolved. Do not start coding yet"
+- name: "needs: decision"
+  color: "F29513"
+  description: "Conflicts with VISION.md or needs a maintainer call"
+- name: "blocked"
+  color: "000000"
+  description: "Waiting on another issue, a dependency, or upstream"
+
+# ── CONTRIBUTOR SIGNALS ─────────────────────────────────────────────
+# Do NOT rename these two - GitHub uses the literal strings for
+# contributor discovery feeds.
+- name: "good first issue"
+  color: "7057FF"
+  description: "Small, fully specified, fix path verified by a maintainer"
+- name: "help wanted"
+  color: "008672"
+  description: "Maintainer won't get to this soon - open for anyone"
+- name: "claimed"
+  color: "0E8A16"
+  description: "Someone is working on it. Auto-removed after 14 days idle"
+
+# ── CLOSURE REASONS — applied at close, for insight ─────────────────
+- name: "duplicate"
+  color: "CFD3D7"
+  description: "Closed as a duplicate; the original is linked"
+- name: "wontfix"
+  color: "FFFFFF"
+  description: "Valid but out of scope - links the VISION.md non-goal"
+- name: "upstream"
+  color: "CFD3D7"
+  description: "Root cause is in Ollama, Tauri, or a provider SDK"
+- name: "invalid"
+  color: "E4E669"
+  description: "Not a real issue, user error, or spam"

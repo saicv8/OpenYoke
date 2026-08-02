@@ -215,11 +215,13 @@ OpenYoke is a **pure Tauri** app — a Rust backend and a dependency-free web UI
 
 ## Roadmap
 
-- [ ] Provider abstraction for multiple backends (the `ollama` module is the seam)
-- [ ] Optionally bundle Ollama so no separate install is needed
-- [ ] Richer tool / function-calling integration
-- [ ] Multi-model agent mode (different models per branch)
-- [ ] Export a branch or the whole tree (Markdown / JSON)
+Milestones, epics and what we've explicitly ruled out live in
+**[ROADMAP.md](ROADMAP.md)**; the principles behind those calls are in
+**[VISION.md](VISION.md)**.
+
+Up next in **v0.2.0 — "A graph you can live in"**: stop and regenerate a
+running answer, navigate large trees (collapse, tidy layout, in-conversation
+search), and full keyboard/accessibility support.
 
 ## Contributing
 

@@ -1,0 +1,180 @@
+# .github/ISSUE_TEMPLATE/01-bug-report.yml
+name: 🐛 Bug report
+description: Something in OpenYoke is broken, crashes, or behaves incorrectly.
+title: "[Bug]: "
+labels: ["type: bug", "needs: triage"]
+# type: bug          # ← uncomment ONLY if OpenYoke moves into an organization
+#                     (GitHub issue types are an org-only feature)
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file this! 🙏
+
+        **⚠️ Privacy notice:** OpenYoke is a local-first, privacy-focused app.
+        Please **redact API keys, prompts, and conversation content** before pasting
+        anything below. Screenshots of the graph canvas are great — just blur the text.
+
+        Found a **security** issue (leaked key, unsafe storage)? Don't file here —
+        use [private security advisories](https://github.com/saicv8/OpenYoke/security/advisories/new).
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checks
+      options:
+        - label: I searched [existing issues](https://github.com/saicv8/OpenYoke/issues?q=is%3Aissue) and this is not a duplicate.
+          required: true
+        - label: I have redacted any private or sensitive content from this report.
+          required: true
+        - label: "Local model involved: I confirmed Ollama itself is running (`ollama list` works in my terminal)."
+
+  - type: input
+    id: version
+    attributes:
+      label: OpenYoke version
+      description: "The release you downloaded. Building from source? Paste the commit SHA (`git rev-parse --short HEAD`)."
+      placeholder: "v0.1.0  —  or  main @ a1b2c3d"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: install-method
+    attributes:
+      label: How did you install OpenYoke?
+      options:
+        - Downloaded a release binary (.dmg / .msi / .AppImage / .deb)
+        - Built from source with `npx tauri build`
+        - Running in dev mode with `npx tauri dev`
+    validations:
+      required: true
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS 14+ (Apple Silicon)
+        - macOS 14+ (Intel)
+        - macOS 13 or older
+        - Windows 11
+        - Windows 10
+        - Linux — Ubuntu / Debian (.deb)
+        - Linux — other (.AppImage)
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which area is affected?
+      description: Matches our `area:` labels. Pick the closest one — we'll re-triage if needed.
+      # Keep these options in sync with .github/workflows/triage.yml (exact match).
+      options:
+        - Graph / branching canvas
+        - Ollama / local models
+        - Cloud providers (Anthropic / OpenAI / Gemini)
+        - Web search
+        - Streaming
+        - Storage / export
+        - Settings
+        - UI / theme / shortcuts
+        - Packaging / install / CI
+        - Docs
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Which provider(s) were in use?
+      multiple: true
+      options:
+        - Ollama (local)
+        - Anthropic (Claude)
+        - OpenAI
+        - OpenAI-compatible (OpenRouter, Groq, LM Studio, …)
+        - Google Gemini
+        - Not model-related
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model name
+      placeholder: "llama3.2:3b"
+
+  - type: checkboxes
+    id: toggles
+    attributes:
+      label: Active toggles at the time of the bug
+      options:
+        - label: 🌐 Web search was enabled
+        - label: The conversation had 2+ branches
+        - label: This happened on a branched node (not the root)
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Be specific enough that a stranger can follow along exactly.
+      value: |
+        1. Open OpenYoke and create a new conversation
+        2. 
+        3. 
+        4. 
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      placeholder: "The branch should keep its own isolated context…"
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      placeholder: "The branch inherited messages from a sibling branch…"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: frequency
+    attributes:
+      label: How often does it happen?
+      options:
+        - Every time (100%)
+        - Often (more than half the time)
+        - Occasionally
+        - Happened once, can't reproduce
+      default: 0
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log output
+      description: "Terminal output from `npx tauri dev`, or the in-app error text. Auto-formatted as code — no backticks needed."
+      render: shell
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots or screen recording
+      description: |
+        **Strongly encouraged for graph/canvas bugs** — OpenYoke is a visual app and a
+        5-second recording usually saves three rounds of back-and-forth.
+        Drag files directly into this box to attach them.
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else?
+      description: Workarounds you found, when it started, related issues.

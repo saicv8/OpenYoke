@@ -1,0 +1,55 @@
+name: 🎯 Epic
+description: "Maintainers: a themed container for multiple user stories."
+title: "[Epic]: "
+labels: ["type: epic", "needs: triage"]
+body:
+  - type: markdown
+    attributes:
+      value: "Epics are never implemented directly — they're broken into stories."
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Outcome
+      placeholder: "When this epic is done, a user can…"
+    validations: { required: true }
+  - type: input
+    id: principle
+    attributes:
+      label: Which VISION.md principle does this serve?
+    validations: { required: true }
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      # Keep these options in sync with .github/workflows/triage.yml (exact match).
+      options:
+        - Graph / branching canvas
+        - Ollama / local models
+        - Cloud providers (Anthropic / OpenAI / Gemini)
+        - Web search
+        - Streaming
+        - Storage / export
+        - Settings
+        - UI / theme / shortcuts
+        - Packaging / install / CI
+        - Docs
+    validations: { required: true }
+  - type: textarea
+    id: stories
+    attributes:
+      label: Child stories
+      description: "Use a task list — GitHub converts these into sub-issues with rolled-up progress."
+      value: |
+        - [ ] #
+        - [ ] #
+    validations: { required: true }
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Explicitly out of scope
+    validations: { required: true }
+  - type: input
+    id: milestone
+    attributes:
+      label: Target milestone
+      placeholder: "v0.2.0 — Graph you can live in"
