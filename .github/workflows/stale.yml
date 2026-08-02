@@ -1,0 +1,83 @@
+# .github/workflows/stale.yml
+#
+# Makes good on the two 14-day promises in .github/labels.yml:
+#   needs: info  →  closed after 14 days of silence
+#   claimed      →  released after 14 days of no activity
+#
+# Any comment, label change, or edit updates `updated_at`, so the clock
+# restarts on real activity. Applies no label that isn't in labels.yml.
+name: Stale gates
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # daily at 03:17 UTC
+  workflow_dispatch:
+
+permissions:
+  issues: write
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const DAYS = 14;
+            const cutoff = Date.now() - DAYS * 24 * 60 * 60 * 1000;
+            const isStale = (issue) => new Date(issue.updated_at).getTime() < cutoff;
+
+            const openWith = (label) => github.paginate(
+              github.rest.issues.listForRepo,
+              { ...context.repo, state: "open", labels: label, per_page: 100 },
+            );
+
+            // 1. needs: info — close after 14 days of silence.
+            for (const issue of await openWith("needs: info")) {
+              if (issue.pull_request || !isStale(issue)) continue;
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issue.number,
+                body: [
+                  `Closing this after ${DAYS} days without the information we asked for.`,
+                  ``,
+                  `Nothing personal — it just keeps the queue honest. If you can still`,
+                  `reproduce this, comment with the missing details and we'll reopen it.`,
+                ].join("\n"),
+              });
+              await github.rest.issues.update({
+                ...context.repo,
+                issue_number: issue.number,
+                state: "closed",
+                state_reason: "not_planned",
+              });
+              core.info(`closed #${issue.number} (needs: info)`);
+            }
+
+            // 2. claimed — release after 14 days of no activity.
+            for (const issue of await openWith("claimed")) {
+              if (issue.pull_request || !isStale(issue)) continue;
+              await github.rest.issues.removeLabel({
+                ...context.repo,
+                issue_number: issue.number,
+                name: "claimed",
+              });
+              const assignees = (issue.assignees || []).map((a) => a.login);
+              if (assignees.length) {
+                await github.rest.issues.removeAssignees({
+                  ...context.repo,
+                  issue_number: issue.number,
+                  assignees,
+                });
+              }
+              await github.rest.issues.createComment({
+                ...context.repo,
+                issue_number: issue.number,
+                body: [
+                  `Unclaiming this after ${DAYS} days of quiet, so it's open to others again.`,
+                  ``,
+                  `Still working on it? Say so and it's yours — no need to start over.`,
+                ].join("\n"),
+              });
+              core.info(`unclaimed #${issue.number}`);
+            }

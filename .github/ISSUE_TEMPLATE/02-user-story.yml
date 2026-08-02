@@ -1,0 +1,124 @@
+# .github/ISSUE_TEMPLATE/02-user-story.yml
+name: 📌 User story
+description: A self-contained unit of user-facing value, ready for someone to build.
+title: "[Story]: As a <user>, I want <goal>"
+labels: ["type: feature", "needs: triage"]
+# type: feature      # ← organization-only (GitHub issue types)
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this for **well-defined work**. If your idea is still fuzzy, start a
+        [💡 Discussion](https://github.com/saicv8/OpenYoke/discussions/categories/ideas) instead —
+        we promote good ideas into stories from there.
+
+        Please read [VISION.md](https://github.com/saicv8/OpenYoke/blob/main/VISION.md) first.
+        Stories that conflict with our principles (local-first, graph-centric, no telemetry)
+        will be closed as `wontfix` with a link to the relevant non-goal.
+
+  - type: checkboxes
+    id: vision-check
+    attributes:
+      label: Vision alignment
+      options:
+        - label: I've read VISION.md and this does not conflict with a stated non-goal.
+          required: true
+        - label: I searched existing issues and the roadmap for duplicates.
+          required: true
+
+  - type: textarea
+    id: story
+    attributes:
+      label: User story
+      value: |
+        **As a** <type of user>
+        **I want** <capability>
+        **So that** <benefit>
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve today?
+      description: Describe the current painful workaround.
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      description: |
+        Checkboxes a reviewer can literally tick off. Phrase them Given / When / Then.
+        **A story is not "Ready" until a stranger could build it from this list alone.**
+      value: |
+        - [ ] Given ..., when ..., then ...
+        - [ ] Given ..., when ..., then ...
+        - [ ] Edge case: ...
+        - [ ] `cargo test` covers the new backend logic
+        - [ ] README / docs updated if user-facing
+        - [ ] Screenshot or GIF attached to the PR if the UI changed
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Primary area
+      # Keep these options in sync with .github/workflows/triage.yml (exact match).
+      options:
+        - Graph / branching canvas
+        - Ollama / local models
+        - Cloud providers (Anthropic / OpenAI / Gemini)
+        - Web search
+        - Streaming
+        - Storage / export
+        - Settings
+        - UI / theme / shortcuts
+        - Packaging / install / CI
+        - Docs
+    validations:
+      required: true
+
+  - type: textarea
+    id: pointers
+    attributes:
+      label: Implementation pointers
+      description: |
+        **This field is what makes a story claimable.** Name the files, the Tauri
+        `invoke` commands, the gotchas. Leave blank if you're the reporter and don't know —
+        a maintainer will fill it in during triage.
+      placeholder: |
+        - Add a new `#[tauri::command]` in `src-tauri/src/main.rs`, register it in the invoke_handler
+        - Wire the frontend button in `static/app.js` with `invoke('your_command', …)`
+        - Watch out: must not break context isolation between sibling branches
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Estimated size
+      options:
+        - "XS — under 1 hour, single file"
+        - "S — half a day"
+        - "M — 1–2 days, frontend + Rust"
+        - "L — about a week, new subsystem"
+        - "XL — too big, needs splitting into smaller stories"
+        - "Not sure"
+      default: 5
+
+  - type: input
+    id: epic
+    attributes:
+      label: Parent epic
+      description: Issue number of the epic this belongs under, if any.
+      placeholder: "#42"
+
+  - type: checkboxes
+    id: claim
+    attributes:
+      label: Are you volunteering?
+      options:
+        - label: I'd like to implement this myself.
+        - label: I'm proposing this for someone else to pick up.
+        - label: I can help test it once it's built.

@@ -1,0 +1,65 @@
+# .github/workflows/triage.yml
+#
+# Applies the `area:` label from the issue form's area dropdown.
+#
+# The option strings in areaMap below must match the dropdown options in
+# .github/ISSUE_TEMPLATE/*.yml EXACTLY. If they ever drift, the issue simply
+# keeps `needs: triage` for a human to label — a wrong label is never applied,
+# and no label outside .github/labels.yml is ever created.
+name: Triage new issues
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  issues: write
+
+jobs:
+  label-area:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || "";
+
+            // Issue-form answers render as "### <field label>" then the value.
+            const answer = (heading) => {
+              const re = new RegExp(`### ${heading}\\s*\\n+([\\s\\S]*?)(?=\\n### |$)`);
+              const m = body.match(re);
+              return m ? m[1].trim() : "";
+            };
+
+            // Exact option text -> label. Substring matching is deliberately
+            // avoided: "build" contains "ui", so "Install / build / packaging"
+            // matched `area: ui` before it ever reached `area: packaging`.
+            const areaMap = {
+              "Graph / branching canvas": "area: graph",
+              "Ollama / local models": "area: ollama",
+              "Cloud providers (Anthropic / OpenAI / Gemini)": "area: cloud-providers",
+              "Web search": "area: web-search",
+              "Streaming": "area: streaming",
+              "Storage / export": "area: storage",
+              "Settings": "area: settings",
+              "UI / theme / shortcuts": "area: ui",
+              "Packaging / install / CI": "area: packaging",
+              "Docs": "area: docs",
+            };
+
+            const area =
+              answer("Which area is affected\\?") ||
+              answer("Primary area") ||
+              answer("Area");
+            const label = areaMap[area];
+
+            if (!label) {
+              core.info(`No area label for ${JSON.stringify(area)} — leaving needs: triage`);
+              return;
+            }
+
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: context.issue.number,
+              labels: [label],
+            });
+            core.info(`Applied ${label} to #${context.issue.number}`);

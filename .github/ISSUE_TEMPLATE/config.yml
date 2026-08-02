@@ -1,0 +1,23 @@
+# .github/ISSUE_TEMPLATE/config.yml
+blank_issues_enabled: false
+
+contact_links:
+  - name: 💬 Question or setup help
+    url: https://github.com/saicv8/OpenYoke/discussions/categories/q-a
+    about: "Ollama won't connect? Build failing? Ask here — not in Issues."
+
+  - name: 💡 Idea or feature brainstorm
+    url: https://github.com/saicv8/OpenYoke/discussions/categories/ideas
+    about: "Half-formed ideas start here. We promote the good ones into User Stories."
+
+  - name: 🙋 Looking for something to work on
+    url: https://github.com/saicv8/OpenYoke/labels/good%20first%20issue
+    about: "Browse verified good first issues before opening something new."
+
+  - name: 🔒 Report a security vulnerability
+    url: https://github.com/saicv8/OpenYoke/security/advisories/new
+    about: "API key handling / local storage issues — report privately, never in a public issue."
+
+  - name: 🗺 Roadmap and vision
+    url: https://github.com/saicv8/OpenYoke/blob/main/ROADMAP.md
+    about: "Check whether your idea is already planned — or listed as a non-goal."

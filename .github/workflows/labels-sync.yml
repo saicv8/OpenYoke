@@ -1,0 +1,23 @@
+name: Sync labels
+
+on:
+  push:
+    branches: [main]
+    paths: ['.github/labels.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read   # required by actions/checkout — declaring any permissions
+                   # block drops unlisted scopes to none, and the clone fails
+  issues: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crazy-max/ghaction-github-labeler@v5
+        with:
+          yaml-file: .github/labels.yml
+          skip-delete: true   # flip to false once you fully trust the file
+          dry-run: false
