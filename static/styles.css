@@ -876,6 +876,12 @@ button.danger-solid:hover {
   border-radius: 10px;
 }
 
+/* The question belonging to the selected card — the panel scrolls here on
+   select, so it needs to be findable among its ancestors. */
+.message.user.current {
+  box-shadow: 0 0 0 1.5px var(--accent);
+}
+
 .message.assistant {
   align-self: stretch;
 }

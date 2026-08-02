@@ -798,7 +798,28 @@ function modelCaption(model) {
   return caption;
 }
 
-function renderPanel() {
+/// Land the panel on the turn the user just selected: its question at the top,
+/// the answer reading downward from there. Ancestors stay above, scrolled out of
+/// the way but still there. Falls back to the bottom when there's no turn to
+/// anchor on (empty panel).
+function scrollToTurn(questionEl) {
+  if (!questionEl) {
+    transcript.scrollTop = transcript.scrollHeight;
+    return;
+  }
+  // Measured rather than offsetTop: the bubbles aren't positioned, so offsetTop
+  // is relative to whatever ancestor happens to be.
+  const delta = questionEl.getBoundingClientRect().top - transcript.getBoundingClientRect().top;
+  transcript.scrollTop += delta - 6; // small gap so it isn't flush against the edge
+}
+
+/// `scroll` picks where the rebuilt transcript lands: 'question' anchors the
+/// selected node's question (what you get when clicking a card), 'bottom' keeps
+/// the tail in view (used when following a streaming answer through to its
+/// finished node, so the read position doesn't jump backwards), 'keep' holds the
+/// current position for re-renders that don't change what's on screen.
+function renderPanel(scroll = 'question') {
+  const priorScroll = transcript.scrollTop;
   transcript.innerHTML = '';
   nodeDelete.classList.toggle('hidden', selectedNodeId == null);
   // The button only makes sense when a node is selected — it's the way OUT of a
@@ -817,8 +838,16 @@ function renderPanel() {
 
   const node = nodeIndex.get(selectedNodeId);
   panelTitle.textContent = truncate(node ? node.question : 'Node', 40) || 'Node';
+  let selectedQuestion = null;
   displayPath(selectedNodeId).forEach((n) => {
-    transcript.appendChild(bubble(n.question, 'user'));
+    const question = bubble(n.question, 'user');
+    // The selected node is the last link in the chain; mark its question so it
+    // reads as "this is the turn you clicked" among its ancestors.
+    if (n.id === selectedNodeId) {
+      question.classList.add('current');
+      selectedQuestion = question;
+    }
+    transcript.appendChild(question);
     const answer = bubble(n.answer, 'assistant');
     // Tag the in-flight bubble so streaming tokens can find it again after any
     // re-render — that's what lets the user click away and back without losing
@@ -835,14 +864,16 @@ function renderPanel() {
     const caption = modelCaption(n.model);
     if (caption) transcript.appendChild(caption);
   });
-  transcript.scrollTop = transcript.scrollHeight;
+  if (scroll === 'bottom') transcript.scrollTop = transcript.scrollHeight;
+  else if (scroll === 'keep') transcript.scrollTop = priorScroll;
+  else scrollToTurn(selectedQuestion);
 }
 
-function selectNode(id) {
+function selectNode(id, scroll = 'question') {
   if (selectedNodeId != null) cardById.get(selectedNodeId)?.classList.remove('selected');
   selectedNodeId = id;
   if (id != null) cardById.get(id)?.classList.add('selected');
-  renderPanel();
+  renderPanel(scroll);
 }
 
 /// Start a new, unconnected thread: deselect so the next question becomes a
@@ -1025,8 +1056,10 @@ async function askNext(question) {
       // Follow through to the finished node only if the user was still watching
       // it stream. If they clicked over to another card mid-generation, leave
       // them where they are rather than yanking the panel away.
-      if (wasFollowingPending) selectNode(node.id);
-      else renderPanel();
+      // Stay at the tail they were reading — anchoring back on the question
+      // would scroll the finished answer they were watching out of view.
+      if (wasFollowingPending) selectNode(node.id, 'bottom');
+      else renderPanel('keep'); // they're on another node; don't move their view
     }
 
     if (movedTo) {
