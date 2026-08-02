@@ -1,0 +1,157 @@
+# .github/workflows/pr-process.yml
+#
+# Enforces the one rule in CONTRIBUTING.md: every change starts as an issue.
+#
+#   1. The PR body must close a real issue   →  "Closes #42"
+#   2. The branch must be the issue's branch →  "42-<slug>" or "fix/42-<slug>"
+#
+# Both halves matter. (1) alone lets someone bolt an issue onto work that was
+# already done; (2) makes it visible from the first commit which issue the work
+# belongs to, and is what GitHub's "Create a branch" button on an issue gives
+# you for free.
+#
+# MAINTAINER SETUP — this check does nothing until it is *required*:
+#
+#   gh api -X PUT repos/saicv8/OpenYoke/branches/main/protection \
+#     -H "Accept: application/vnd.github+json" \
+#     -f 'required_status_checks[strict]=true' \
+#     -f 'required_status_checks[contexts][]=issue-first' \
+#     -F 'enforce_admins=false' \
+#     -F 'required_pull_request_reviews=null' \
+#     -F 'restrictions=null'
+#
+# Runs on `pull_request`, so fork PRs get a read-only token — this workflow
+# only reads issues and never writes, which is exactly what that allows.
+name: PR process
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  issue-first:
+    name: issue-first
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const pr     = context.payload.pull_request;
+            const branch = pr.head.ref;
+
+            // HTML comments are stripped first: the PR template ships with
+            // instructions inside them, and a "Closes #" example in a comment
+            // must never count as a real link.
+            const body = (pr.body || "").replace(/<!--[\s\S]*?-->/g, "");
+
+            const KEYWORDS = /\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\b\s*:?\s*#(\d+)/gi;
+            const linked = [...new Set(
+              [...body.matchAll(KEYWORDS)].map((m) => Number(m[1])),
+            )];
+
+            const fail = async (title, ...lines) => {
+              core.summary.addHeading(`❌ ${title}`, 3).addRaw(lines.join("\n"), true);
+              await core.summary.write();
+              core.setFailed(title);
+            };
+
+            // ── 1. the PR must close at least one real, open-able issue ────
+            if (!linked.length) {
+              return fail(
+                "This pull request does not close an issue",
+                "Every change in OpenYoke starts as an issue — see",
+                "[CONTRIBUTING.md](../blob/main/CONTRIBUTING.md#the-one-rule-every-change-starts-as-an-issue).",
+                "",
+                "Add a line like `Closes #42` to the PR description. If no issue exists yet,",
+                "open one now, then create your branch from it and rebase this work onto it.",
+                "",
+                "Accepted keywords: `close`/`closes`/`closed`, `fix`/`fixes`/`fixed`,",
+                "`resolve`/`resolves`/`resolved`.",
+              );
+            }
+
+            const issues = [];
+            for (const number of linked) {
+              let data;
+              try {
+                ({ data } = await github.rest.issues.get({ ...context.repo, issue_number: number }));
+              } catch (err) {
+                if (err.status !== 404) throw err;
+                return fail(
+                  `#${number} does not exist in this repository`,
+                  "Check the number, or open the issue first.",
+                );
+              }
+              if (data.pull_request) {
+                return fail(
+                  `#${number} is a pull request, not an issue`,
+                  "`Closes` must point at the issue this work implements, not at another PR.",
+                );
+              }
+              issues.push(data);
+            }
+
+            // ── 2. the branch must be the branch the issue suggested ───────
+            // GitHub's "Create a branch" button on an issue produces
+            // `<number>-<slug>`; a `type/` prefix is allowed for people who
+            // branch by hand.
+            const AUTOMATION = /^(?:dependabot|renovate)\//;
+            const BRANCH = /^(?:(?:bug|fix|feat|feature|enh|enhancement|task|chore|docs|epic)\/)?(\d+)(?:[-_].*)?$/;
+
+            if (AUTOMATION.test(branch)) {
+              core.info(`${branch} is an automation branch — branch-name check skipped`);
+            } else {
+              const m = branch.match(BRANCH);
+              if (!m) {
+                return fail(
+                  `Branch \`${branch}\` is not named after an issue`,
+                  `Expected \`${linked[0]}-<slug>\` or \`<type>/${linked[0]}-<slug>\`.`,
+                  "",
+                  "The easiest way to get this right is to never name a branch by hand:",
+                  `open issue #${linked[0]}, and use **Development → Create a branch** in the`,
+                  "right-hand sidebar. GitHub names it correctly and links it to the issue.",
+                  "",
+                  "To rename this one:",
+                  "```bash",
+                  `git branch -m ${linked[0]}-$(echo "${branch}" | sed 's|.*/||')`,
+                  "git push origin -u $(git branch --show-current)",
+                  "```",
+                  "Then edit this PR to point at the new branch (or reopen it from the new one).",
+                );
+              }
+              const fromBranch = Number(m[1]);
+              if (!linked.includes(fromBranch)) {
+                return fail(
+                  `Branch \`${branch}\` and the closed issue disagree`,
+                  `The branch says #${fromBranch}; the description closes ${linked.map((n) => `#${n}`).join(", ")}.`,
+                  "",
+                  "One of the two is wrong. If this PR genuinely closes several issues, keep the",
+                  "branch's own issue in the list.",
+                );
+              }
+            }
+
+            // ── passed ─────────────────────────────────────────────────────
+            const gates = ["needs: design", "needs: decision", "needs: info", "blocked"];
+            core.summary.addHeading("✅ Issue-first process followed", 3);
+            core.summary.addTable([
+              [{ data: "Issue", header: true }, { data: "State", header: true }, { data: "Title", header: true }],
+              ...issues.map((i) => [`#${i.number}`, i.state, i.title]),
+            ]);
+            core.summary.addRaw(`Branch \`${branch}\``, true);
+
+            // Not a failure — a gated issue can legitimately be unblocked by
+            // the time the PR lands. It just should not pass review silently.
+            for (const issue of issues) {
+              const hit = issue.labels.map((l) => l.name).filter((n) => gates.includes(n));
+              if (hit.length) {
+                core.warning(`#${issue.number} is still labelled ${hit.join(", ")} — should work have started?`);
+              }
+            }
+
+            await core.summary.write();
